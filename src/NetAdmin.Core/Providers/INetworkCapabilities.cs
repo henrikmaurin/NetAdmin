@@ -126,6 +126,14 @@ public record HomeAssistantStatusSummary(
 public interface IHomeAssistantProvider : INetworkIntegration
 {
     Task<HomeAssistantStatusSummary?> GetStatusAsync(string? deviceId = null, string? ipOrUrl = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieve the list of entities from a Home Assistant instance. The returned
+    /// HomeAssistantEntity objects include a small set of candidate identifiers
+    /// (ip, ip_address, mac, mac_address, device_id) extracted from attributes to
+    /// assist downstream matching to NetAdmin hardware entries.
+    /// </summary>
+    Task<IReadOnlyList<NetAdmin.Core.Models.HomeAssistantEntity>> GetEntitiesAsync(string? deviceId = null, string? ipOrUrl = null, CancellationToken ct = default);
 }
 
 public record PatchPanelPort(

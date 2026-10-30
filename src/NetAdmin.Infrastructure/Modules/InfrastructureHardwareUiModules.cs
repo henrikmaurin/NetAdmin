@@ -756,6 +756,8 @@ public static class InfrastructureHardwareModuleExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHardwareUiModule, GenericHardwareUiModule>());
         services.TryAddSingleton<HardwareTypeRegistry>();
         services.TryAddSingleton<ProductCatalogRegistry>();
+        // Register Home Assistant sync service implementation (depends on IHomeAssistantProvider registered by provider plugins)
+        services.AddScoped<NetAdmin.Core.Services.IHomeAssistantSyncService, NetAdmin.Infrastructure.Services.HomeAssistantSyncService>();
 
         RegisterAssemblyHardwareTypes(services, typeof(InfrastructureHardwareModuleExtensions).Assembly);
 
