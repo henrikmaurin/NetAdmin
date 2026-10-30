@@ -1,0 +1,24 @@
+services:
+  netadmin:
+    container_name: netadmin
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./appdata:/app/data
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/netadmin.db
+      # OPNsense API-inställningar (används i Etapp 2)
+      - OpnSense__BaseUrl=https://192.168.1.1
+      - OpnSense__ApiKey=${OPNSENSE_API_KEY}
+      - OpnSense__ApiSecret=${OPNSENSE_API_SECRET}
+      - OpnSense__IgnoreSslErrors=true
+      # UniFi Network API-inställningar (används i Etapp 3)
+      - UniFi__BaseUrl=https://192.168.1.10:8443
+      - UniFi__Site=default
+      - UniFi__ApiKey=${UNIFI_API_KEY}
+      - UniFi__IgnoreSslErrors=true
+    restart: unless-stopped

@@ -1,0 +1,41 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+@inject PfSenseService PfSenseService
+
+@if (Device is not null)
+{
+    if (Compact)
+    {
+        @AnchorAction($"/switch/{Device.Id}", "Open Port & VLAN Overview", "🔌", "primary")
+        @AnchorAction(Device.EffectiveManagementUrl, "Open Web GUI", "🛡️", "blue")
+    }
+    else
+    {
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+            @AnchorAction($"/switch/{Device.Id}", "Open Port & VLAN Overview", "🔌 Open Port & VLAN Overview", "primary")
+            @AnchorAction(Device.EffectiveManagementUrl, "Open Web GUI", "🛡️ Open pfSense", "blue")
+            @ButtonAction(ProbeAsync, "🔎 Probe", "primary")
+        </div>
+    }
+
+    @InfoBox(_probeMessage)
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase
+
+@code {
+    [Inject] private NetAdmin.Core.Services.IEncryptedSettingsService? SettingsService { get; set; }
+
+    private async Task ProbeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Device.IpAddress)) return;
+        var res = await PfSenseService.ProbeAsync(Device.IpAddress);
+        _probeMessage = $"Probe: web={(res.HasWeb ? "yes" : "no")}, api={(res.HasApi ? "yes" : "no")}";
+        StateHasChanged();
+        await Task.Delay(3000);
+        _probeMessage = null;
+        StateHasChanged();
+    }
+
+    private string? _probeMessage;
+}

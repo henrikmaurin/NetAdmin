@@ -1,0 +1,384 @@
+@page "/onboarding"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.DataProtection
+@using NetAdmin.Core.Providers
+@using NetAdmin.Core.Services
+@inject IAdminAuthService AuthService
+@inject IEncryptedSettingsService SettingsService
+@inject IEnumerable<IRoutingProvider> RoutingProviders
+@inject IEnumerable<IWirelessProvider> WirelessProviders
+@inject IDataProtectionProvider ProtectionProvider
+@inject NavigationManager Navigation
+
+<PageTitle>NetAdmin - Welcome & Onboarding</PageTitle>
+
+<div style="font-family: system-ui, sans-serif; max-width: 820px; margin: 2rem auto; padding: 1.5rem;">
+    <div style="text-align: center; margin-bottom: 2rem;">
+        <h1 style="margin: 0; color: #0f172a;">Welcome to NetAdmin</h1>
+        <p style="color: #64748b; margin: 0.4rem 0 0 0;">Complete the initial setup to secure your system and connect your network integrations.</p>
+    </div>
+
+    <!-- Step Indicator -->
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 2rem;">
+        <div style="padding: 0.75rem 1rem; border-radius: 8px; border: 2px solid @(_step == 1 ? "#0284c7" : (_step > 1 ? "#16a34a" : "#e2e8f0")); background: @(_step == 1 ? "#f0f9ff" : (_step > 1 ? "#f0fdf4" : "#f8fafc"));">
+            <div style="font-size: 0.75rem; font-weight: 700; color: @(_step == 1 ? "#0284c7" : (_step > 1 ? "#166534" : "#64748b"));">STEP 1</div>
+            <div style="font-weight: 600; color: #0f172a; margin-top: 0.15rem;">@(_step > 1 ? "✓ " : "")Create Admin Account</div>
+        </div>
+        <div style="padding: 0.75rem 1rem; border-radius: 8px; border: 2px solid @(_step == 2 ? "#0284c7" : (_step > 2 ? "#16a34a" : "#e2e8f0")); background: @(_step == 2 ? "#f0f9ff" : (_step > 2 ? "#f0fdf4" : "#f8fafc"));">
+            <div style="font-size: 0.75rem; font-weight: 700; color: @(_step == 2 ? "#0284c7" : (_step > 2 ? "#166534" : "#64748b"));">STEP 2</div>
+            <div style="font-weight: 600; color: #0f172a; margin-top: 0.15rem;">@(_step > 2 ? "✓ " : "")Configure Integrations</div>
+        </div>
+        <div style="padding: 0.75rem 1rem; border-radius: 8px; border: 2px solid @(_step == 3 ? "#0284c7" : "#e2e8f0"); background: @(_step == 3 ? "#f0f9ff" : "#f8fafc");">
+            <div style="font-size: 0.75rem; font-weight: 700; color: @(_step == 3 ? "#0284c7" : "#64748b");">STEP 3</div>
+            <div style="font-weight: 600; color: #0f172a; margin-top: 0.15rem;">Ready to Launch</div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <div style="padding: 0.85rem 1rem; border-radius: 6px; margin-bottom: 1.25rem; background: #fef2f2; border: 1px solid #f87171; color: #991b1b;">
+            @_errorMessage
+        </div>
+    }
+
+    @if (_step == 1)
+    {
+        <div style="background: white; border: 1px solid #cbd5e1; border-radius: 10px; padding: 1.75rem;">
+            <h2 style="margin-top: 0; color: #0f172a;">👤 Step 1: Create System Administrator Account</h2>
+            <p style="font-size: 0.9rem; color: #64748b; margin-bottom: 1.25rem;">
+                Create the local administrator account required to access and administer NetAdmin. Credentials are hashed with PBKDF2-SHA256 and encrypted at rest.
+            </p>
+
+            <div style="display: grid; grid-template-columns: 1fr; gap: 1rem; max-width: 480px;">
+                <div>
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Administrator Username</label>
+                    <input @bind="_adminUsername"
+                           placeholder="admin"
+                           style="width: 100%; padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Password (min. 6 characters)</label>
+                    <input @bind="_adminPassword"
+                           type="password"
+                           placeholder="Choose a strong password"
+                           style="width: 100%; padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Confirm Password</label>
+                    <input @bind="_adminPasswordConfirm"
+                           type="password"
+                           placeholder="Repeat password"
+                           style="width: 100%; padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 1.75rem;">
+                <button @onclick="CompleteStep1Async"
+                        style="padding: 0.7rem 1.4rem; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+                    Save Account & Continue →
+                </button>
+            </div>
+        </div>
+    }
+    else if (_step == 2)
+    {
+        <div style="background: white; border: 1px solid #cbd5e1; border-radius: 10px; padding: 1.75rem; margin-bottom: 1.25rem;">
+            <h2 style="margin-top: 0; color: #0f172a;">🔌 Step 2: Configure Network Integrations</h2>
+            <p style="font-size: 0.9rem; color: #64748b; margin-bottom: 1.5rem;">
+                Connect your primary router/firewall and wireless controller for automatic topology discovery, ARP/DHCP correlation, and Wi-Fi telemetry. Per-device SSH and API credentials can also be configured directly on each device page.
+            </p>
+
+            <!-- OPNsense Section -->
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+                    <h3 style="margin: 0; color: #1e293b;">🔥 OPNsense Firewall & Router</h3>
+                    <button type="button"
+                            @onclick="TestOpnSenseAsync"
+                            disabled="@_testingOpn"
+                            style="padding: 0.4rem 0.9rem; background: #0f172a; color: white; border: none; border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                        @(_testingOpn ? "⏳ Testing..." : "🔌 Test OPNsense Connection")
+                    </button>
+                </div>
+                <p style="font-size: 0.82rem; color: #64748b; margin-top: 0;">
+                    Requires an API user with permissions for Firmware, VLAN, ARP, and Kea/ISC DHCPv4.
+                </p>
+
+                <div style="display: grid; grid-template-columns: 1fr; gap: 0.85rem;">
+                    <div>
+                        <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Base URL</label>
+                        <input @bind="_opnBaseUrl" placeholder="https://192.168.1.1" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem;">
+                        <div>
+                            <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">API Key</label>
+                            <input @bind="_opnApiKey" type="password" placeholder="Paste key=..." style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">API Secret</label>
+                            <input @bind="_opnApiSecret" type="password" placeholder="Paste secret=..." style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                        </div>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_opnTestMessage))
+                {
+                    <div style="margin-top: 0.75rem; padding: 0.55rem 0.8rem; border-radius: 6px; font-size: 0.82rem; background: @(_opnTestOk ? "#f0fdf4" : "#fef2f2"); border: 1px solid @(_opnTestOk ? "#86efac" : "#f87171"); color: @(_opnTestOk ? "#166534" : "#991b1b");">
+                        @_opnTestMessage
+                    </div>
+                }
+            </div>
+
+            <!-- UniFi Section -->
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+                    <h3 style="margin: 0; color: #1e293b;">📶 Ubiquiti UniFi Network Controller</h3>
+                    <button type="button"
+                            @onclick="TestUniFiAsync"
+                            disabled="@_testingUniFi"
+                            style="padding: 0.4rem 0.9rem; background: #0f172a; color: white; border: none; border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                        @(_testingUniFi ? "⏳ Testing..." : "🔌 Test UniFi Connection")
+                    </button>
+                </div>
+                <p style="font-size: 0.82rem; color: #64748b; margin-top: 0;">
+                    Use a local Read-Only administrator or a UniFi Network 8.5+ API Key.
+                </p>
+
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0.85rem; margin-bottom: 0.85rem;">
+                    <div>
+                        <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Controller Base URL</label>
+                        <input @bind="_unifiBaseUrl" placeholder="https://192.168.1.10:8443" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Site Name</label>
+                        <input @bind="_unifiSite" placeholder="default" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; margin-bottom: 0.85rem;">
+                    <div>
+                        <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Username</label>
+                        <input @bind="_unifiUsername" placeholder="svc_netadmin" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Password</label>
+                        <input @bind="_unifiPassword" type="password" placeholder="Controller password" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.85rem; align-items: end;">
+                    <div>
+                        <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">API Key (Optional, UniFi Network 8.5+)</label>
+                        <input @bind="_unifiApiKey" type="password" placeholder="Optional X-API-KEY" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+                    </div>
+                    <label style="display: flex; align-items: center; gap: 0.4rem; padding-bottom: 0.45rem; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                        <input type="checkbox" @bind="_unifiIsOs" />
+                        UniFi OS (UDM / CloudKey Gen2+)
+                    </label>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_unifiTestMessage))
+                {
+                    <div style="margin-top: 0.75rem; padding: 0.55rem 0.8rem; border-radius: 6px; font-size: 0.82rem; background: @(_unifiTestOk ? "#f0fdf4" : "#fef2f2"); border: 1px solid @(_unifiTestOk ? "#86efac" : "#f87171"); color: @(_unifiTestOk ? "#166534" : "#991b1b");">
+                        @_unifiTestMessage
+                    </div>
+                }
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.75rem;">
+                <button type="button"
+                        @onclick="() => _step = 1"
+                        style="padding: 0.65rem 1.2rem; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 600; cursor: pointer;">
+                    ← Back
+                </button>
+                <div style="display: flex; gap: 0.75rem;">
+                    <button type="button"
+                            @onclick="CompleteStep2Async"
+                            style="padding: 0.7rem 1.4rem; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+                        Save Integrations & Continue →
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+    else if (_step == 3)
+    {
+        <div style="background: white; border: 1px solid #cbd5e1; border-radius: 10px; padding: 2rem; text-align: center;">
+            <div style="font-size: 3rem; margin-bottom: 0.5rem;">🎉</div>
+            <h2 style="margin-top: 0; color: #0f172a;">NetAdmin is Ready!</h2>
+            <p style="color: #64748b; max-width: 540px; margin: 0 auto 1.5rem auto; font-size: 0.95rem;">
+                Your administrator account and integration settings have been encrypted and saved in the local SQLite database. You can also configure device-specific SSH and API credentials on each device's details page.
+            </p>
+
+            <div style="max-width: 460px; margin: 0 auto 1.75rem auto; text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1rem;">
+                <div style="margin-bottom: 0.5rem; font-size: 0.9rem;">
+                    <strong>👤 Administrator:</strong> @_adminUsername
+                </div>
+                <div style="margin-bottom: 0.5rem; font-size: 0.9rem;">
+                    <strong>🔥 OPNsense Integration:</strong> @(!string.IsNullOrWhiteSpace(_opnApiKey) ? $"Configured ({_opnBaseUrl})" : "Not configured (can be added later)")
+                </div>
+                <div style="font-size: 0.9rem;">
+                    <strong>📶 UniFi Integration:</strong> @(!string.IsNullOrWhiteSpace(_unifiUsername) || !string.IsNullOrWhiteSpace(_unifiApiKey) ? $"Configured ({_unifiBaseUrl})" : "Not configured (can be added later)")
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: center; gap: 1rem;">
+                <button type="button"
+                        @onclick="() => _step = 2"
+                        style="padding: 0.7rem 1.2rem; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 600; cursor: pointer;">
+                    ← Back to Integrations
+                </button>
+                <button type="button"
+                        @onclick="FinishOnboardingAsync"
+                        style="padding: 0.75rem 1.75rem; background: #16a34a; color: white; border: none; border-radius: 6px; font-weight: 700; font-size: 1rem; cursor: pointer;">
+                    🚀 Finish & Open Dashboard
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private int _step = 1;
+    private string? _errorMessage;
+
+    // Step 1: Admin Account
+    private string _adminUsername = "admin";
+    private string _adminPassword = "";
+    private string _adminPasswordConfirm = "";
+
+    // Step 2: Integrations
+    private string _opnBaseUrl = "https://192.168.1.1";
+    private string _opnApiKey = "";
+    private string _opnApiSecret = "";
+    private bool _testingOpn;
+    private bool _opnTestOk;
+    private string? _opnTestMessage;
+
+    private string _unifiBaseUrl = "https://192.168.1.10:8443";
+    private string _unifiSite = "default";
+    private string _unifiUsername = "";
+    private string _unifiPassword = "";
+    private string _unifiApiKey = "";
+    private bool _unifiIsOs;
+    private bool _testingUniFi;
+    private bool _unifiTestOk;
+    private string? _unifiTestMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var existingUser = await AuthService.GetAdminUsernameAsync();
+        if (!string.IsNullOrWhiteSpace(existingUser))
+        {
+            _adminUsername = existingUser;
+        }
+
+        _opnBaseUrl = await SettingsService.GetSettingAsync("OpnSense:BaseUrl", "OpnSense:BaseUrl") ?? "https://192.168.1.1";
+        _opnApiKey = await SettingsService.GetSettingAsync("OpnSense:ApiKey", "OpnSense:ApiKey") ?? "";
+        _opnApiSecret = await SettingsService.GetSettingAsync("OpnSense:ApiSecret", "OpnSense:ApiSecret") ?? "";
+
+        _unifiBaseUrl = await SettingsService.GetSettingAsync("UniFi:BaseUrl", "UniFi:BaseUrl") ?? "https://192.168.1.10:8443";
+        _unifiSite = await SettingsService.GetSettingAsync("UniFi:Site", "UniFi:Site") ?? "default";
+        _unifiUsername = await SettingsService.GetSettingAsync("UniFi:Username", "UniFi:Username") ?? "";
+        _unifiPassword = await SettingsService.GetSettingAsync("UniFi:Password", "UniFi:Password") ?? "";
+        _unifiApiKey = await SettingsService.GetSettingAsync("UniFi:ApiKey", "UniFi:ApiKey") ?? "";
+        _unifiIsOs = bool.TryParse(await SettingsService.GetSettingAsync("UniFi:IsUniFiOs", "UniFi:IsUniFiOs"), out var isOs) && isOs;
+    }
+
+    private async Task CompleteStep1Async()
+    {
+        _errorMessage = null;
+
+        if (string.IsNullOrWhiteSpace(_adminUsername))
+        {
+            _errorMessage = "Please enter an administrator username.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_adminPassword) || _adminPassword.Length < 6)
+        {
+            _errorMessage = "Password must be at least 6 characters long.";
+            return;
+        }
+
+        if (_adminPassword != _adminPasswordConfirm)
+        {
+            _errorMessage = "Passwords do not match.";
+            return;
+        }
+
+        await AuthService.ConfigureAdminAsync(_adminUsername, _adminPassword);
+        _step = 2;
+    }
+
+    private async Task SaveIntegrationsInternalAsync()
+    {
+        await SettingsService.SaveSettingAsync("OpnSense:BaseUrl", _opnBaseUrl);
+        await SettingsService.SaveSettingAsync("OpnSense:ApiKey", _opnApiKey);
+        await SettingsService.SaveSettingAsync("OpnSense:ApiSecret", _opnApiSecret);
+
+        await SettingsService.SaveSettingAsync("UniFi:BaseUrl", _unifiBaseUrl);
+        await SettingsService.SaveSettingAsync("UniFi:Site", _unifiSite);
+        await SettingsService.SaveSettingAsync("UniFi:Username", _unifiUsername);
+        await SettingsService.SaveSettingAsync("UniFi:Password", _unifiPassword);
+        await SettingsService.SaveSettingAsync("UniFi:ApiKey", _unifiApiKey);
+        await SettingsService.SaveSettingAsync("UniFi:IsUniFiOs", _unifiIsOs ? "true" : "false");
+    }
+
+    private async Task TestOpnSenseAsync()
+    {
+        _testingOpn = true;
+        _opnTestMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            await SaveIntegrationsInternalAsync();
+            var provider = RoutingProviders.FirstOrDefault();
+            _opnTestOk = provider is not null && await provider.TestConnectionAsync();
+            _opnTestMessage = _opnTestOk
+                ? "✅ Successfully connected to OPNsense API!"
+                : "❌ Could not connect to OPNsense API. Verify Base URL, API Key, and API Secret.";
+        }
+        finally
+        {
+            _testingOpn = false;
+        }
+    }
+
+    private async Task TestUniFiAsync()
+    {
+        _testingUniFi = true;
+        _unifiTestMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            await SaveIntegrationsInternalAsync();
+            var provider = WirelessProviders.FirstOrDefault();
+            _unifiTestOk = provider is not null && await provider.TestConnectionAsync();
+            _unifiTestMessage = _unifiTestOk
+                ? "✅ Successfully connected to UniFi Network Controller!"
+                : "❌ Could not connect to UniFi Controller. Verify Base URL, Site, and credentials.";
+        }
+        finally
+        {
+            _testingUniFi = false;
+        }
+    }
+
+    private async Task CompleteStep2Async()
+    {
+        _errorMessage = null;
+        await SaveIntegrationsInternalAsync();
+        _step = 3;
+    }
+
+    private async Task FinishOnboardingAsync()
+    {
+        await AuthService.SetOnboardingCompletedAsync(true);
+
+        var protector = ProtectionProvider.CreateProtector("NetAdmin.Onboarding.SignIn.v1");
+        var token = protector.Protect($"{_adminUsername.Trim()}|{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}");
+        Navigation.NavigateTo($"/auth/token-signin?token={Uri.EscapeDataString(token)}&redirect=/", forceLoad: true);
+    }
+}

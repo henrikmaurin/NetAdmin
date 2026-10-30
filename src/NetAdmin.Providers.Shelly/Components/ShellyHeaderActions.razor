@@ -1,0 +1,16 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+
+@if (Device is ShellyHardwareDevice sh && !string.IsNullOrWhiteSpace(sh.IpAddress))
+{
+    if (Compact)
+    {
+        @AnchorAction($"http://{sh.IpAddress}", "Open Shelly GUI", "⚡", "shelly")
+    }
+    else
+    {
+        @AnchorAction($"http://{sh.IpAddress}", "Open Shelly GUI", $"⚡ Shelly GUI (Gen {sh.Generation})", "shelly")
+    }
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase

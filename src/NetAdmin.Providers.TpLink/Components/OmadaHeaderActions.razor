@@ -1,0 +1,38 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+@inject OmadaService OmadaService
+@inject NetAdmin.Core.Services.IEncryptedSettingsService SettingsService
+
+@if (Device is not null)
+{
+    if (Compact)
+    {
+        @AnchorAction(Device.EffectiveManagementUrl, "Open Controller UI", "📡", "teal")
+    }
+    else
+    {
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+            @AnchorAction(Device.EffectiveManagementUrl, "Open Controller UI", "📡 Open Omada", "teal")
+            @ButtonAction(ProbeAsync, "🔎 Probe", "primary")
+        </div>
+    }
+
+    @InfoBox(_probeMessage)
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase
+
+@code {
+    private string? _probeMessage;
+
+    private async Task ProbeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Device.IpAddress)) return;
+        var res = await OmadaService.ProbeAsync(Device.IpAddress);
+        _probeMessage = $"Probe: web={(res.HasWeb ? "yes" : "no")}, api={(res.HasApi ? "yes" : "no")}";
+        StateHasChanged();
+        await Task.Delay(3000);
+        _probeMessage = null;
+        StateHasChanged();
+    }
+}

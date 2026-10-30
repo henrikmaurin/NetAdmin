@@ -1,0 +1,17 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+
+@if (Device is EnergyMeterHardwareDevice meter)
+{
+    <div class="card-summary card-summary--energymeter">
+        <div><strong>@meter.Vendor @meter.MeterModel</strong></div>
+        @if (!string.IsNullOrWhiteSpace(meter.MeterInterface))
+        {
+            <div style="font-size: 0.72rem; color: #065f46; margin-top: 0.15rem;">
+                📊 Interface: <strong>@meter.MeterInterface</strong>
+            </div>
+        }
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase

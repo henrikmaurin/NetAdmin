@@ -1,0 +1,428 @@
+@page "/services"
+@rendermode InteractiveServer
+@using System.Text.Json
+@using Microsoft.EntityFrameworkCore
+@using NetAdmin.Core.Models
+@using NetAdmin.Infrastructure.Data
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IHardwareInventoryProvider HardwareProvider
+@inject IJSRuntime JS
+@inject NetAdmin.Web.Services.ServiceProviderRegistry ProviderRegistry
+
+<PageTitle>NetAdmin - Services</PageTitle>
+
+<div style="font-family: system-ui, sans-serif; max-width: 980px; margin: 0 auto; padding: 1.5rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+        <div>
+            <a href="/" style="text-decoration: none; color: #0066cc; font-size: 0.9rem;">← Back to Dashboard</a>
+            <h1 style="margin: 0.25rem 0 0 0;">Services</h1>
+            <small style="color: #64748b;">Register logical services and optionally link them to physical devices (e.g. Home Assistant, Frigate, NVR).</small>
+        </div>
+    </div>
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem;">
+        <h3 style="margin-top: 0;">Register New Service</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin-bottom: 1rem;">
+            <div>
+                <label style="display:block; font-size:0.75rem; font-weight:600; margin-bottom:0.25rem;">Name</label>
+                <input @bind="_newService.Name" placeholder="e.g. Home Assistant" style="width:100%; padding:0.45rem; border:1px solid #cbd5e1; border-radius:4px;" />
+            </div>
+            <div>
+                <label style="display:block; font-size:0.75rem; font-weight:600; margin-bottom:0.25rem;">Type</label>
+                <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <select @bind="_newServiceType" style="padding:0.45rem; border:1px solid #cbd5e1; border-radius:4px;">
+                        @foreach(var t in Enum.GetValues<ServiceType>())
+                        {
+                            <option value="@t">@t.ToDisplayName()</option>
+                        }
+                    </select>
+                    @if (_newServiceType == ServiceType.Other)
+                    {
+                        <input @bind="_newServiceCustomType" placeholder="Custom type" style="padding:0.45rem; border:1px solid #cbd5e1; border-radius:4px;" />
+                    }
+                </div>
+            </div>
+            <div>
+                <label style="display:block; font-size:0.75rem; font-weight:600; margin-bottom:0.25rem;">Linked Device (optional)</label>
+                <select @bind="_newService.LinkedDeviceId" style="width:100%; padding:0.45rem; border:1px solid #cbd5e1; border-radius:4px;">
+                    <option value="">-- None --</option>
+                    @foreach(var d in _hardware)
+                    {
+                        <option value="@d.Id">@d.Name (@d.Category.ToDisplayName())</option>
+                    }
+                </select>
+            </div>
+            <div style="grid-column: 1 / -1;">
+                <label style="display:block; font-size:0.75rem; font-weight:600; margin-bottom:0.25rem;">Description (optional)</label>
+                <input @bind="_newService.Description" placeholder="Short free text description" style="width:100%; padding:0.45rem; border:1px solid #cbd5e1; border-radius:4px;" />
+            </div>
+        </div>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+            <button @onclick="AddServiceAsync" style="padding:0.55rem 1.25rem; background:#0284c7; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">+ Add Service</button>
+            <button @onclick="LoadAsync" style="padding:0.55rem 1.25rem; background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">↻ Refresh</button>
+            @if (!string.IsNullOrWhiteSpace(_errorMessage))
+            {
+                <div style="color:#b91c1c; margin-left:1rem; font-size:0.9rem;">@_errorMessage</div>
+            }
+        </div>
+    </div>
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem;">
+        <h3 style="margin-top: 0;">Registered Services</h3>
+        @if (_services.Count == 0)
+        {
+            <p style="color:#64748b;">No services registered yet.</p>
+        }
+        else
+        {
+            <table style="width:100%; border-collapse:collapse; font-size:0.95rem;">
+                <thead>
+                    <tr style="background:#f1f5f9; text-align:left; border-bottom:2px solid #cbd5e1;">
+                        <th style="padding:0.6rem;">Name</th>
+                        <th style="padding:0.6rem;">Type</th>
+                        <th style="padding:0.6rem;">Linked Device</th>
+                        <th style="padding:0.6rem;">Description</th>
+                        <th style="padding:0.6rem;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach(var s in _services)
+                    {
+                        if (_editingId is not null && s.Id == _editingId && _editingService is not null)
+                        {
+                            <tr style="border-bottom:1px solid #e2e8f0; background:#f8fafc;">
+                                <td style="padding:0.6rem; font-weight:600;">
+                                    <input @bind="_editingService.Name" style="width:100%; padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;" />
+                                </td>
+                                <td style="padding:0.6rem;">
+                                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                                        <select @bind="_editingServiceType" style="padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;">
+                                            @foreach(var t in Enum.GetValues<ServiceType>())
+                                            {
+                                                <option value="@t">@t.ToDisplayName()</option>
+                                            }
+                                        </select>
+                                        @if (_editingServiceType == ServiceType.Other)
+                                        {
+                                            <input @bind="_editingServiceCustomType" placeholder="Custom type" style="padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;" />
+                                        }
+                                    </div>
+                                </td>
+                                <td style="padding:0.6rem;">
+                                    <select @bind="_editingService.LinkedDeviceId" style="width:100%; padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;">
+                                        <option value="">-- None --</option>
+                                        @foreach(var d in _hardware)
+                                        {
+                                            <option value="@d.Id">@d.Name (@d.Category.ToDisplayName())</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td style="padding:0.6rem; color:#475569;">
+                                    <input @bind="_editingService.Description" style="width:100%; padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;" />
+                                </td>
+                                <td style="padding:0.6rem; text-align:right;">
+                                    <button @onclick="SaveEditAsync" style="background:#16a34a; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Save</button>
+                                    <button @onclick="CancelEdit" style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem;">Cancel</button>
+                                </td>
+                                
+                            
+                            @if (!string.IsNullOrWhiteSpace(_editErrorMessage))
+                            {
+                                <tr><td colspan="5" style="color:#b91c1c; padding:0.5rem 0.6rem;">@_editErrorMessage</td></tr>
+                            }
+                            </tr>
+                        }
+                        else
+                        {
+                            <tr style="border-bottom:1px solid #e2e8f0;">
+                                <td style="padding:0.6rem; font-weight:600;">@s.Name</td>
+                                <td style="padding:0.6rem;">@s.Type</td>
+                                <td style="padding:0.6rem;">
+                                    @if (!string.IsNullOrWhiteSpace(s.LinkedDeviceId))
+                                    {
+                                        var dev = _hardware.FirstOrDefault(d => d.Id == s.LinkedDeviceId);
+                                        if (dev is not null)
+                                        {
+                                            <a href="/device/@dev.Id" style="color:#0284c7; text-decoration:none;">@dev.Name</a>
+                                        }
+                                        else
+                                        {
+                                            <span style="color:#64748b;">(device not found)</span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span style="color:#64748b;">—</span>
+                                    }
+                                </td>
+                                <td style="padding:0.6rem; color:#475569;">@s.Description</td>
+                                <td style="padding:0.6rem; text-align:right;">
+                                    <button @onclick="() => BeginEdit(s)" style="background:#0f172a; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Edit</button>
+                                    <button @onclick="() => TestConnectionAsync(s.Id)" style="background:#1e40af; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Test</button>
+                                    <button @onclick="() => ShowDetails(s.Id)" disabled="@(!_lastStatuses.ContainsKey(s.Id))" style="background:#06b6d4; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Details</button>
+                                    <button @onclick="() => ConfirmAndDeleteAsync(s.Id)" style="background:#dc2626; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem;">Remove</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+    <div style="margin-top:0.6rem; color:#334155; font-size:0.9rem;">
+        @foreach(var kv in _testResults)
+        {
+            <div style="margin-top:0.25rem;">Test result for <strong>@(_services.FirstOrDefault(s => s.Id == kv.Key)?.Name ?? kv.Key)</strong>: <code style="background:#f1f5f9; padding:0.15rem 0.4rem; border-radius:4px;">@kv.Value</code></div>
+        }
+    </div>
+
+    @if (_showDetailsModal && _modalStatus is not null)
+    {
+        <div style="position:fixed; inset:0; background:rgba(2,6,23,0.6); display:flex; align-items:center; justify-content:center; z-index:60;">
+            <div style="background:white; padding:1rem; border-radius:8px; width: min(900px, 95%); max-height: 90%; overflow:auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                    <h3 style="margin:0;">Service Status — @_modalStatus.ProviderName</h3>
+                    <button @onclick="CloseDetails" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:0.3rem 0.6rem; border-radius:4px;">Close</button>
+                </div>
+                <div style="font-size:0.95rem; color:#334155;">
+                    <div><strong>State:</strong> @_modalStatus.State</div>
+                    <div><strong>Version:</strong> @_modalStatus.Version</div>
+                    <div style="margin-bottom:0.5rem;"><strong>Summary:</strong> @_modalStatus.Summary</div>
+                    <div style="margin-top:0.5rem;"><strong>Details (raw JSON):</strong></div>
+                    <pre style="background:#f8fafc; padding:0.6rem; border-radius:6px; overflow:auto; max-height:50vh;">@DisplayDetails(_modalStatus.Details)</pre>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ServiceItem> _services = new();
+    private IReadOnlyList<HardwareDevice> _hardware = [];
+
+    private ServiceItem _newService = new ServiceItem(Guid.NewGuid().ToString("N")[..8], "", "", "", "");
+    private ServiceType _newServiceType = ServiceType.Other;
+    private string _newServiceCustomType = "";
+    private string _errorMessage = "";
+
+    // Editing state
+    private string? _editingId;
+    private ServiceItem? _editingService;
+    private ServiceType _editingServiceType = ServiceType.Other;
+    private string _editingServiceCustomType = "";
+    private string _editErrorMessage = "";
+    private Dictionary<string, NetAdmin.Core.Models.ServiceStatus> _lastStatuses = new();
+    private Dictionary<string, string> _testResults = new();
+    private bool _showDetailsModal;
+    private NetAdmin.Core.Models.ServiceStatus? _modalStatus;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _hardware = await HardwareProvider.GetAllHardwareAsync();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var rows = await db.Services.AsNoTracking().ToListAsync();
+        _services = rows.Select(s => new ServiceItem(s.Id, s.Name, s.Type, s.Description ?? "", s.LinkedDeviceId ?? "")).ToList();
+    }
+
+    private async Task AddServiceAsync()
+    {
+        _errorMessage = null;
+        if (string.IsNullOrWhiteSpace(_newService.Name))
+        {
+            _errorMessage = "Name is required.";
+            return;
+        }
+        // Validation: unique name
+        if (_services.Any(s => string.Equals(s.Name, _newService.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            _errorMessage = "A service with that name already exists.";
+            return;
+        }
+        var id = Guid.NewGuid().ToString("N")[..8];
+        var typeToStore = _newServiceType == ServiceType.Other ? (_newServiceCustomType ?? "Other") : _newServiceType.ToString();
+
+        var entity = new ServiceEntity
+        {
+            Id = id,
+            Name = _newService.Name,
+            Type = typeToStore,
+            Description = _newService.Description,
+            LinkedDeviceId = string.IsNullOrWhiteSpace(_newService.LinkedDeviceId) ? null : _newService.LinkedDeviceId
+        };
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.Services.Add(entity);
+        await db.SaveChangesAsync();
+
+        _newService = new ServiceItem(Guid.NewGuid().ToString("N")[..8], "", "", "", "");
+        _newServiceType = ServiceType.Other;
+        _newServiceCustomType = "";
+        await LoadAsync();
+    }
+
+    private async Task DeleteServiceAsync(string id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Services.FirstOrDefaultAsync(s => s.Id == id);
+        if (entity is not null)
+        {
+            db.Services.Remove(entity);
+            await db.SaveChangesAsync();
+        }
+
+        await LoadAsync();
+    }
+
+    private string DisplayDetails(object? details)
+    {
+        if (details is null) return "(no details)";
+        try
+        {
+            return System.Text.Json.JsonSerializer.Serialize(details, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return details.ToString() ?? "(unserializable)";
+        }
+    }
+
+    private void BeginEdit(ServiceItem s)
+    {
+        _editingId = s.Id;
+        _editingService = new ServiceItem(s.Id, s.Name, s.Type, s.Description, s.LinkedDeviceId);
+        // map stored type to enum or custom
+        if (Enum.TryParse<ServiceType>(s.Type, out var parsed))
+        {
+            _editingServiceType = parsed;
+            _editingServiceCustomType = "";
+        }
+        else
+        {
+            _editingServiceType = ServiceType.Other;
+            _editingServiceCustomType = s.Type;
+        }
+        _editErrorMessage = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _editingService = null;
+        _editingServiceCustomType = "";
+    }
+
+    private async Task SaveEditAsync()
+    {
+        _editErrorMessage = null;
+        if (_editingService is null) return;
+        // Validate unique name
+        if (_services.Any(s => s.Id != _editingService.Id && string.Equals(s.Name, _editingService.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            _editErrorMessage = "A service with that name already exists.";
+            return;
+        }
+
+        var typeToStore = _editingServiceType == ServiceType.Other ? (_editingServiceCustomType ?? "Other") : _editingServiceType.ToString();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Services.FirstOrDefaultAsync(x => x.Id == _editingService.Id);
+        if (entity is not null)
+        {
+            entity.Name = _editingService.Name;
+            entity.Type = typeToStore;
+            entity.Description = _editingService.Description;
+            entity.LinkedDeviceId = string.IsNullOrWhiteSpace(_editingService.LinkedDeviceId) ? null : _editingService.LinkedDeviceId;
+            await db.SaveChangesAsync();
+        }
+
+        _editingId = null;
+        _editingService = null;
+        await LoadAsync();
+    }
+
+    private async Task ConfirmAndDeleteAsync(string id)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", "Are you sure you want to remove this service?");
+        if (ok)
+        {
+            await DeleteServiceAsync(id);
+        }
+    }
+
+    private async Task TestConnectionAsync(string serviceId)
+    {
+        _testResults.Remove(serviceId);
+        var svc = _services.FirstOrDefault(s => s.Id == serviceId);
+        if (svc is null)
+        {
+            _testResults[serviceId] = "Service not found.";
+            return;
+        }
+
+        // Prefer provider matched via registry
+        var prov = ProviderRegistry.GetProviderForType(svc.Type);
+        var candidates = prov is not null ? new[] { prov }.Concat(ProviderRegistry.AllProviders().Except(new[] { prov })) : ProviderRegistry.AllProviders();
+
+        foreach (var provCandidate in candidates)
+        {
+            try
+            {
+                var status = await provCandidate.GetServiceStatusAsync(svc.Id, null);
+                if (status is not null)
+                {
+                    _lastStatuses[serviceId] = status;
+                    _testResults.Remove(serviceId);
+                    StateHasChanged();
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Keep trying other providers but capture last error
+                _testResults[serviceId] = $"Error: {ex.Message}";
+            }
+        }
+
+        if (!_testResults.ContainsKey(serviceId))
+            _testResults[serviceId] = "No suitable provider responded.";
+    }
+
+    private void ShowDetails(string serviceId)
+    {
+        if (_lastStatuses.TryGetValue(serviceId, out var s))
+        {
+            _modalStatus = s;
+            _showDetailsModal = true;
+        }
+    }
+
+    private void CloseDetails()
+    {
+        _modalStatus = null;
+        _showDetailsModal = false;
+    }
+
+    private class ServiceItem
+    {
+        public ServiceItem(string id, string name, string type, string description, string linkedDeviceId)
+        {
+            Id = id;
+            Name = name;
+            Type = type;
+            Description = description;
+            LinkedDeviceId = linkedDeviceId;
+        }
+
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string Type { get; set; }
+        public string Description { get; set; }
+        public string LinkedDeviceId { get; set; }
+    }
+}

@@ -1,0 +1,353 @@
+﻿@page "/setup"
+@rendermode InteractiveServer
+@using NetAdmin.Core.Providers
+@using NetAdmin.Core.Services
+@inject IEncryptedSettingsService SettingsService
+@inject IAdminAuthService AuthService
+@inject IEnumerable<IRoutingProvider> RoutingProviders
+@inject IEnumerable<IWirelessProvider> WirelessProviders
+@inject IEnumerable<IFrigateProvider> FrigateProviders
+@inject IEnumerable<IHomeAssistantProvider> HomeAssistantProviders
+@inject NavigationManager Navigation
+
+<PageTitle>NetAdmin - Settings & Onboarding</PageTitle>
+
+<div style="font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <a href="/" style="text-decoration: none; color: #0066cc; font-size: 0.9rem;">← Back to Dashboard</a>
+            <h1 style="margin: 0.25rem 0 0 0;">System Settings & Connections</h1>
+            <small style="color: #666;">Configure your API keys here. Values are encrypted securely in the SQLite database.</small>
+        </div>
+        <a href="/onboarding"
+           style="padding: 0.5rem 0.95rem; background: #0f172a; color: white; text-decoration: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600;">
+            🧭 Run Onboarding Wizard
+        </a>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <div style="padding: 0.85rem 1rem; border-radius: 6px; margin-bottom: 1.5rem; background: @(_isError ? "#fef2f2" : "#f0fdf4"); border: 1px solid @(_isError ? "#f87171" : "#86efac"); color: @(_isError ? "#991b1b" : "#166534");">
+            @_statusMessage
+        </div>
+    }
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <h3 style="margin: 0; color: #1e293b;">🔥 OPNsense Firewall & Router</h3>
+            <button type="button"
+                    @onclick="TestOpnSenseAsync"
+                    disabled="@_testingOpn"
+                    style="padding: 0.4rem 0.9rem; background: #0f172a; color: white; border: none; border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                @(_testingOpn ? "⏳ Testing..." : "🔌 Save & Test OPNsense")
+            </button>
+        </div>
+        <p style="font-size: 0.85rem; color: #64748b;">
+            Requires an API user assigned to the <code>netadmin_api</code> privilege group (with permissions for Firmware, VLAN, ARP and Kea/ISC DHCPv4).
+        </p>
+
+        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem; margin-bottom: 1rem;">
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Base URL</label>
+                <input @bind="_opnBaseUrl" placeholder="https://192.168.1.1" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">API Key</label>
+                <input @bind="_opnApiKey" type="password" placeholder="Paste key=..." style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">API Secret</label>
+                <input @bind="_opnApiSecret" type="password" placeholder="Paste secret=..." style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+        </div>
+    </div>
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <h3 style="margin: 0; color: #1e293b;">📶 UniFi Network Controller</h3>
+            <button type="button"
+                    @onclick="TestUniFiAsync"
+                    disabled="@_testingUniFi"
+                    style="padding: 0.4rem 0.9rem; background: #0f172a; color: white; border: none; border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                @(_testingUniFi ? "⏳ Testing..." : "🔌 Save & Test UniFi")
+            </button>
+        </div>
+        <p style="font-size: 0.85rem; color: #64748b;">
+            Use a local Read-Only administrator created under <em>Settings ➔ System ➔ Administration</em> (enable <em>Restrict to Local Access Only</em>).
+        </p>
+
+        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem; margin-bottom: 1rem;">
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Controller Base URL</label>
+                <input @bind="_unifiBaseUrl" placeholder="https://192.168.1.10:8443" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem;">
+                <div>
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Username</label>
+                    <input @bind="_unifiUsername" placeholder="svc_netadmin" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Site Name</label>
+                    <input @bind="_unifiSite" placeholder="default" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+                </div>
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Password</label>
+                <input @bind="_unifiPassword" type="password" placeholder="Your password" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+        </div>
+    </div>
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <h3 style="margin: 0; color: #1e293b;">🎥 Frigate NVR</h3>
+            <button type="button"
+                    @onclick="TestFrigateAsync"
+                    disabled="@_testingFrigate"
+                    style="padding: 0.4rem 0.9rem; background: #0f172a; color: white; border: none; border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                @(_testingFrigate ? "⏳ Testing..." : "🔌 Save & Test Frigate")
+            </button>
+        </div>
+        <p style="font-size: 0.85rem; color: #64748b;">
+            Connect your Frigate NVR instance to query camera FPS, AI detectors, and NVR health.
+        </p>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Frigate Base URL</label>
+                <input @bind="_frigateBaseUrl" placeholder="http://192.168.1.50:5000" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Bearer Token (Optional)</label>
+                <input @bind="_frigateApiToken" type="password" placeholder="Optional JWT/Proxy token" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+        </div>
+    </div>
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <h3 style="margin: 0; color: #1e293b;">🏡 Home Assistant</h3>
+            <button type="button"
+                    @onclick="TestHomeAssistantAsync"
+                    disabled="@_testingHa"
+                    style="padding: 0.4rem 0.9rem; background: #0f172a; color: white; border: none; border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                @(_testingHa ? "⏳ Testing..." : "🔌 Save & Test Home Assistant")
+            </button>
+        </div>
+        <p style="font-size: 0.85rem; color: #64748b;">
+            Connect Home Assistant using a Long-Lived Access Token created under <em>Profile ➔ Security</em>.
+        </p>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Home Assistant Base URL</label>
+                <input @bind="_haBaseUrl" placeholder="http://192.168.1.20:8123" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Long-Lived Access Token</label>
+                <input @bind="_haAccessToken" type="password" placeholder="eyJhbGciOiJIUzI1NiIs..." style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+        </div>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-bottom: 2rem;">
+        <button @onclick="SaveSettingsAsync"
+                style="padding: 0.75rem 1.5rem; background: #16a34a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            💾 Save Encrypted Settings
+        </button>
+    </div>
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem;">
+        <h3 style="margin-top: 0; color: #1e293b;">👤 Administrator Account</h3>
+        <p style="font-size: 0.85rem; color: #64748b;">
+            Update the local administrator username or password used to sign in to NetAdmin.
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Admin Username</label>
+                <input @bind="_adminUsername" placeholder="admin" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">New Password</label>
+                <input @bind="_newAdminPassword" type="password" placeholder="Min. 6 characters" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+            </div>
+        </div>
+
+        <button @onclick="UpdateAdminCredentialsAsync"
+                style="padding: 0.6rem 1.2rem; background: #0284c7; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            🔐 Update Administrator Credentials
+        </button>
+    </div>
+</div>
+
+@code {
+    private string _opnBaseUrl = string.Empty;
+    private string _opnApiKey = string.Empty;
+    private string _opnApiSecret = string.Empty;
+
+    private string _unifiBaseUrl = string.Empty;
+    private string _unifiUsername = string.Empty;
+    private string _unifiPassword = string.Empty;
+    private string _unifiSite = "default";
+
+    private string _frigateBaseUrl = string.Empty;
+    private string _frigateApiToken = string.Empty;
+
+    private string _haBaseUrl = string.Empty;
+    private string _haAccessToken = string.Empty;
+
+    private string _adminUsername = "admin";
+    private string _newAdminPassword = string.Empty;
+
+    private bool _testingOpn;
+    private bool _testingUniFi;
+    private bool _testingFrigate;
+    private bool _testingHa;
+    private string? _statusMessage;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _opnBaseUrl = await SettingsService.GetSettingAsync("OpnSense:BaseUrl", "OpnSense:BaseUrl") ?? "https://192.168.1.1";
+        _opnApiKey = await SettingsService.GetSettingAsync("OpnSense:ApiKey", "OpnSense:ApiKey") ?? string.Empty;
+        _opnApiSecret = await SettingsService.GetSettingAsync("OpnSense:ApiSecret", "OpnSense:ApiSecret") ?? string.Empty;
+
+        _unifiBaseUrl = await SettingsService.GetSettingAsync("UniFi:BaseUrl", "UniFi:BaseUrl") ?? "https://192.168.1.10:8443";
+        _unifiUsername = await SettingsService.GetSettingAsync("UniFi:Username", "UniFi:Username") ?? string.Empty;
+        _unifiPassword = await SettingsService.GetSettingAsync("UniFi:Password", "UniFi:Password") ?? string.Empty;
+        _unifiSite = await SettingsService.GetSettingAsync("UniFi:Site", "UniFi:Site") ?? "default";
+
+        _frigateBaseUrl = await SettingsService.GetSettingAsync("Frigate:BaseUrl", "Frigate:BaseUrl") ?? string.Empty;
+        _frigateApiToken = await SettingsService.GetSettingAsync("Frigate:ApiToken", "Frigate:ApiToken") ?? string.Empty;
+
+        _haBaseUrl = await SettingsService.GetSettingAsync("HomeAssistant:BaseUrl", "HomeAssistant:BaseUrl") ?? string.Empty;
+        _haAccessToken = await SettingsService.GetSettingAsync("HomeAssistant:AccessToken", "HomeAssistant:AccessToken") ?? string.Empty;
+
+        _adminUsername = await AuthService.GetAdminUsernameAsync() ?? "admin";
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        try
+        {
+            await SettingsService.SaveSettingAsync("OpnSense:BaseUrl", _opnBaseUrl);
+            await SettingsService.SaveSettingAsync("OpnSense:ApiKey", _opnApiKey);
+            await SettingsService.SaveSettingAsync("OpnSense:ApiSecret", _opnApiSecret);
+
+            await SettingsService.SaveSettingAsync("UniFi:BaseUrl", _unifiBaseUrl);
+            await SettingsService.SaveSettingAsync("UniFi:Username", _unifiUsername);
+            await SettingsService.SaveSettingAsync("UniFi:Password", _unifiPassword);
+            await SettingsService.SaveSettingAsync("UniFi:Site", _unifiSite);
+
+            await SettingsService.SaveSettingAsync("Frigate:BaseUrl", _frigateBaseUrl);
+            await SettingsService.SaveSettingAsync("Frigate:ApiToken", _frigateApiToken);
+
+            await SettingsService.SaveSettingAsync("HomeAssistant:BaseUrl", _haBaseUrl);
+            await SettingsService.SaveSettingAsync("HomeAssistant:AccessToken", _haAccessToken);
+
+            _isError = false;
+            _statusMessage = "✅ Settings saved and encrypted in the SQLite database!";
+        }
+        catch (Exception ex)
+        {
+            _isError = true;
+            _statusMessage = $"❌ Failed to save settings: {ex.Message}";
+        }
+    }
+
+    private async Task TestOpnSenseAsync()
+    {
+        _testingOpn = true;
+        StateHasChanged();
+        try
+        {
+            await SaveSettingsAsync();
+            var provider = RoutingProviders.FirstOrDefault();
+            var ok = provider is not null && await provider.TestConnectionAsync();
+            _isError = !ok;
+            _statusMessage = ok
+                ? "✅ Settings saved and OPNsense API connection verified!"
+                : "❌ Settings saved, but could not connect to OPNsense API.";
+        }
+        finally
+        {
+            _testingOpn = false;
+        }
+    }
+
+    private async Task TestUniFiAsync()
+    {
+        _testingUniFi = true;
+        StateHasChanged();
+        try
+        {
+            await SaveSettingsAsync();
+            var provider = WirelessProviders.FirstOrDefault();
+            var ok = provider is not null && await provider.TestConnectionAsync();
+            _isError = !ok;
+            _statusMessage = ok
+                ? "✅ Settings saved and UniFi Network Controller connection verified!"
+                : "❌ Settings saved, but could not connect to UniFi Controller.";
+        }
+        finally
+        {
+            _testingUniFi = false;
+        }
+    }
+
+    private async Task TestFrigateAsync()
+    {
+        _testingFrigate = true;
+        StateHasChanged();
+        try
+        {
+            await SaveSettingsAsync();
+            var provider = FrigateProviders.FirstOrDefault();
+            var status = provider is not null ? await provider.GetStatusAsync() : null;
+            _isError = status is null;
+            _statusMessage = status is not null
+                ? $"✅ Settings saved and Frigate v{status.Version} connection verified ({status.CameraCount} cameras)!"
+                : "❌ Settings saved, but could not connect to Frigate API.";
+        }
+        finally
+        {
+            _testingFrigate = false;
+        }
+    }
+
+    private async Task TestHomeAssistantAsync()
+    {
+        _testingHa = true;
+        StateHasChanged();
+        try
+        {
+            await SaveSettingsAsync();
+            var provider = HomeAssistantProviders.FirstOrDefault();
+            var status = provider is not null ? await provider.GetStatusAsync() : null;
+            _isError = status is null;
+            _statusMessage = status is not null
+                ? $"✅ Settings saved and Home Assistant v{status.Version} ({status.LocationName}) verified!"
+                : "❌ Settings saved, but could not connect to Home Assistant API.";
+        }
+        finally
+        {
+            _testingHa = false;
+        }
+    }
+
+    private async Task UpdateAdminCredentialsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_adminUsername) || string.IsNullOrWhiteSpace(_newAdminPassword) || _newAdminPassword.Length < 6)
+        {
+            _isError = true;
+            _statusMessage = "❌ Username is required and password must be at least 6 characters.";
+            return;
+        }
+
+        await AuthService.ConfigureAdminAsync(_adminUsername, _newAdminPassword);
+        _newAdminPassword = string.Empty;
+        _isError = false;
+        _statusMessage = "✅ Administrator account credentials updated!";
+    }
+}

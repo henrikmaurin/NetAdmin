@@ -1,0 +1,80 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using NetAdmin.Core.Models
+@inject IHardwareInventoryProvider HardwareProvider
+
+@if (Device is PatchPanelHardwareDevice panel)
+{
+    <div class="card card--muted">
+        <h4 class="card-header">🔌 Patch Panel Settings & Ports</h4>
+        <div class="card-grid" style="margin-bottom:1rem;">
+            <div>
+                <label class="form-label">Number of Ports</label>
+                <input type="number" min="4" max="48"
+                       value="@panel.PortCount"
+                       @onchange="@(e => UpdatePanel(panel with { PortCount = int.TryParse(e.Value?.ToString(), out var p) ? p : 8, Model = $"{(int.TryParse(e.Value?.ToString(), out var pm) ? pm : 8)}-Port Patch Panel" }))"
+                       class="form-input" />
+            </div>
+        </div>
+
+        @if (_ports.Count > 0)
+        {
+            <div style="border-top: 1px solid #e2e8f0; padding-top: 0.85rem;">
+                <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; color: #334155;">
+                    Label physical ports in this patch panel (@_ports.Count ports):
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem;">
+                    @foreach (var p in _ports)
+                    {
+                        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.65rem;">
+                            <div style="font-weight: bold; font-size: 0.85rem; margin-bottom: 0.35rem;">Port @p.PortNumber</div>
+                            <input value="@p.Label"
+                                   @onchange="@(e => SavePortAsync(p with { Label = e.Value?.ToString() ?? "" }))"
+                                   placeholder="Port label"
+                                   style="width: 100%; padding: 0.35rem; margin-bottom: 0.35rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.82rem;" />
+                            <input value="@p.Room"
+                                   @onchange="@(e => SavePortAsync(p with { Room = e.Value?.ToString() ?? "" }))"
+                                   placeholder="Room (e.g. Bedroom)"
+                                   style="width: 100%; padding: 0.35rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.82rem;" />
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            <p style="font-size: 0.82rem; color: #64748b; margin: 0;">
+                Save the patch panel to generate and label its @panel.PortCount ports.
+            </p>
+        }
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.TypedDeviceComponentBase<NetAdmin.Core.Models.PatchPanelHardwareDevice>
+
+@code {
+    private IReadOnlyList<PatchPanelPortItem> _ports = [];
+    private string? _loadedDeviceId;
+    private int _loadedPortCount;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Device is PatchPanelHardwareDevice panel && !string.IsNullOrWhiteSpace(panel.Id))
+        {
+            if (_loadedDeviceId != panel.Id || _loadedPortCount != panel.PortCount)
+            {
+                _loadedDeviceId = panel.Id;
+                _loadedPortCount = panel.PortCount;
+                _ports = await HardwareProvider.GetPatchPanelPortsAsync(panel.Id);
+            }
+        }
+    }
+
+    private Task UpdatePanel(PatchPanelHardwareDevice updated) => NotifyDeviceChanged(updated);
+
+    private async Task SavePortAsync(PatchPanelPortItem item)
+    {
+        await HardwareProvider.SavePatchPanelPortAsync(item);
+        _ports = await HardwareProvider.GetPatchPanelPortsAsync(item.PatchPanelId);
+    }
+}

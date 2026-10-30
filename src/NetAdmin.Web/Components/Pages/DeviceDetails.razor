@@ -1,0 +1,652 @@
+﻿@page "/device/{Id}"
+@rendermode InteractiveServer
+@using NetAdmin.Core.Models
+@using NetAdmin.Core.Providers
+@using NetAdmin.Infrastructure.Services
+@inject IHardwareInventoryProvider HardwareProvider
+@inject IPhysicalLinkProvider PhysicalLinkProvider
+@inject NavigationManager Navigation
+@inject IRoomProvider RoomProvider
+@inject NetworkTraceService TraceService
+@inject HardwareTypeRegistry TypeRegistry
+@inject NetAdmin.Core.Services.IEncryptedSettingsService SettingsService
+@inject IEnumerable<IRoutingProvider> RoutingProviders
+@inject IEnumerable<IWirelessProvider> WirelessProviders
+@inject IEnumerable<IFrigateProvider> FrigateProviders
+@inject IEnumerable<IHomeAssistantProvider> HomeAssistantProviders
+
+<PageTitle>NetAdmin - @(_device?.Name ?? "Device Details")</PageTitle>
+
+<div style="font-family: system-ui, sans-serif; max-width: 1050px; margin: 0 auto; padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <div style="display: flex; gap: 1rem;">
+            <a href="/hardware" style="text-decoration: none; color: #0066cc; font-size: 0.9rem;">← Back to Hardware Inventory</a>
+            <a href="/" style="text-decoration: none; color: #64748b; font-size: 0.9rem;">🏠 Back to Dashboard</a>
+        </div>
+        @if (_device is not null)
+        {
+            <button @onclick="DeleteDeviceAsync" style="background: #dc2626; color: white; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">
+                🗑️ Delete Device
+            </button>
+        }
+    </div>
+
+    @if (_device is null)
+    {
+        <div style="padding: 2rem; background: #fef2f2; border: 1px solid #f87171; border-radius: 8px;">
+            Device not found. <a href="/hardware">Return to inventory</a>.
+        </div>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_statusMessage))
+        {
+            <div style="padding: 0.75rem 1rem; background: #f0fdf4; border: 1px solid #86efac; color: #166534; border-radius: 6px; margin-bottom: 1rem;">
+                @_statusMessage
+            </div>
+        }
+
+        <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+                <div>
+                    <span style="background: #e2e8f0; color: #334155; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600;">
+                        @(_activeModule?.Icon ?? "💻") @(_activeModule?.DisplayName ?? _device.Category.ToDisplayName())
+                    </span>
+                    <h1 style="margin: 0.4rem 0 0 0;">@_device.Name</h1>
+                </div>
+
+                <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                    @if (!string.IsNullOrWhiteSpace(_device.EffectiveManagementUrl))
+                    {
+                        <a href="@_device.EffectiveManagementUrl" target="_blank"
+                           style="padding: 0.6rem 1.2rem; background: #0284c7; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 0.85rem;">
+                            🌐 Open Web GUI (@_device.EffectiveManagementUrl)
+                        </a>
+                    }
+                    @if (_activeModule?.HeaderActionsComponentType is not null)
+                    {
+                        <DynamicComponent Type="_activeModule.HeaderActionsComponentType"
+                                          Parameters="@(new Dictionary<string, object?> { ["Device"] = _device })" />
+                    }
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Device Name</label>
+                    <input value="@_device.Name"
+                           @oninput="@(e => _device = _device with { Name = e.Value?.ToString() ?? "" })"
+                           style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Category / Module</label>
+                    <select value="@(_activeModule?.ModuleId)"
+                            @onchange="OnModuleChanged"
+                            style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                        @foreach (var mod in TypeRegistry.AllModules)
+                        {
+                            <option value="@mod.ModuleId">@mod.DisplayName</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Room / Location</label>
+                    <div style="display: flex; gap: 0.4rem;">
+                        <select value="@_device.Room"
+                                @onchange="@(e => _device = _device with { Room = e.Value?.ToString() ?? "" })"
+                                style="flex: 1; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                            <option value="">-- Select Room --</option>
+                            @foreach (var room in _availableRooms)
+                            {
+                                <option value="@room.Name">@room.Name (@room.BuildingOrZone)</option>
+                            }
+                        </select>
+                        <button type="button" @onclick="() => _showNewRoomInput = !_showNewRoomInput"
+                                style="padding: 0 0.75rem; background: #0f172a; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;"
+                                title="Create new room">
+                            @(_showNewRoomInput ? "✕" : "+ New")
+                        </button>
+                    </div>
+
+                    @if (_showNewRoomInput)
+                    {
+                        <div style="display: flex; gap: 0.4rem; margin-top: 0.5rem; background: #f8fafc; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                            <input @bind="_newRoomName" placeholder="New room name..." style="flex: 1; padding: 0.35rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem;" />
+                            <button type="button" @onclick="CreateNewRoomAsync" style="background: #16a34a; color: white; border: none; padding: 0.35rem 0.75rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">Save</button>
+                        </div>
+                    }
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Manufacturer (Free Text)</label>
+                    <input value="@_device.Vendor"
+                           @oninput="@(e => UpdateTopLevelVendor(e.Value?.ToString() ?? ""))"
+                           placeholder="e.g. Dell, Asus, HomeWizard, Xiaomi, Shelly"
+                           style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Model (Free Text)</label>
+                    <input value="@_device.Model"
+                           @oninput="@(e => UpdateTopLevelModel(e.Value?.ToString() ?? ""))"
+                           placeholder="e.g. XPS 15 / RT-AX86U Pro / Wi-Fi P1 Meter"
+                           style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Physical Ports (0 for Wi-Fi)</label>
+                    <input type="number" min="0" max="48"
+                           value="@_device.PortCount"
+                           @onchange="@(e => _device = _device with { PortCount = int.TryParse(e.Value?.ToString(), out var p) ? p : 0 })"
+                           style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">IP Address</label>
+                    <input value="@_device.IpAddress"
+                           @oninput="@(e => _device = _device with { IpAddress = e.Value?.ToString() })"
+                           placeholder="192.168.1.x"
+                           style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">MAC Address</label>
+                    <input value="@_device.MacAddress"
+                           @oninput="@(e => _device = _device with { MacAddress = e.Value?.ToString() })"
+                           placeholder="AA:BB:CC:DD:EE:FF"
+                           style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Custom Management URL (optional)</label>
+                    <input value="@_device.ManagementUrl"
+                           @oninput="@(e => _device = _device with { ManagementUrl = e.Value?.ToString() })"
+                           placeholder="http://192.168.1.x"
+                           style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Tags (for firewall groups etc.)</label>
+                    <input value="@_device.TagsCsv"
+                           @oninput="@(e => _device = _device with { TagsCsv = e.Value?.ToString() ?? "" })"
+                           placeholder="shelly, iot, vlan20"
+                           style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+            </div>
+
+            @if (_activeModule?.EditorComponentType is not null)
+            {
+                <DynamicComponent Type="_activeModule.EditorComponentType"
+                                  Parameters="@GetEditorParameters()" />
+            }
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Notes</label>
+                <textarea value="@_device.Notes"
+                          @oninput="@(e => _device = _device with { Notes = e.Value?.ToString() ?? "" })"
+                          rows="2"
+                          style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;"></textarea>
+            </div>
+
+            <button @onclick="SaveChangesAsync" style="padding: 0.6rem 1.4rem; background: #16a34a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                💾 Save Changes
+            </button>
+        </div>
+
+        var credFields = _activeModule?.GetCredentialFields(_device) ?? [];
+        @if (credFields.Count > 0)
+        {
+            <div id="device-credentials" style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                    <div>
+                        <h3 style="margin: 0;">🔐 API & Device Credentials (@(_activeModule?.DisplayName ?? _device.Category.ToDisplayName()))</h3>
+                        <p style="color: #64748b; margin: 0.25rem 0 0 0; font-size: 0.85rem;">
+                            Configure encrypted per-device credentials (API keys, tokens, SSH, or web authentication) used by provider actions.
+                        </p>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem; margin-top: 1rem;">
+                    @foreach (var field in credFields)
+                    {
+                        var currentVal = _credentialValues.TryGetValue(field.KeySuffix, out var v) ? v : "";
+                        <div>
+                            <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">
+                                @field.Label
+                            </label>
+                            <input value="@currentVal"
+                                   type="@(field.IsSecret && !_showSecrets ? "password" : "text")"
+                                   placeholder="@field.Placeholder"
+                                   @oninput="@(e => _credentialValues[field.KeySuffix] = e.Value?.ToString() ?? "")"
+                                   style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                            @if (!string.IsNullOrWhiteSpace(field.HelpText))
+                            {
+                                <small style="display: block; color: #64748b; font-size: 0.72rem; margin-top: 0.2rem;">@field.HelpText</small>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                    <button @onclick="SaveCredentialsAsync"
+                            style="padding: 0.5rem 1rem; background: #0284c7; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        💾 Save Credentials
+                    </button>
+
+                    @if (credFields.Any(f => f.GlobalSettingKey?.StartsWith("OpnSense:") == true ||
+                                             f.GlobalSettingKey?.StartsWith("UniFi:") == true ||
+                                             f.GlobalSettingKey?.StartsWith("Frigate:") == true ||
+                                             f.GlobalSettingKey?.StartsWith("HomeAssistant:") == true))
+                    {
+                        <button @onclick="SaveAndTestApiConnectionAsync"
+                                disabled="@_isTestingApi"
+                                style="padding: 0.5rem 1rem; background: #0f172a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                            @(_isTestingApi ? "⏳ Testing API..." : "🔌 Save & Test API Connection")
+                        </button>
+                    }
+
+                    @if (credFields.Any(f => f.IsSecret))
+                    {
+                        <button type="button"
+                                @onclick="() => _showSecrets = !_showSecrets"
+                                style="padding: 0.45rem 0.8rem; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">
+                            @(_showSecrets ? "🙈 Hide Secrets" : "👁️ Show Secrets")
+                        </button>
+                    }
+
+                    <span style="color: #64748b; font-size: 0.8rem;">🔒 Encrypted at rest in SQLite</span>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_credStatus))
+                {
+                    <div style="margin-top: 0.75rem; color: @(_credError ? "#991b1b" : "#166534"); background: @(_credError ? "#fef2f2" : "#f0fdf4"); border: 1px solid @(_credError ? "#f87171" : "#86efac"); padding: 0.55rem 0.85rem; border-radius: 6px; font-size: 0.85rem;">
+                        @_credStatus
+                    </div>
+                }
+            </div>
+        }
+
+        <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+                <h3 style="margin: 0;">🔗 Connected Cables & Ports on @_device.Name</h3>
+                @if (_device.Category is HardwareCategory.Switch or HardwareCategory.Router || (_device.PortCount > 1 && _device.Category is not HardwareCategory.PatchPanel))
+                {
+                    <a href="/switch/@_device.Id"
+                       style="padding: 0.45rem 0.9rem; background: #1e293b; color: white; text-decoration: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600;">
+                        🎛️ Configure Ports & VLANs (@_device.PortCount Ports) →
+                    </a>
+                }
+            </div>
+            @if (_deviceLinks.Count == 0)
+            {
+                <p style="color: #64748b; font-size: 0.9rem;">No physical cables are registered for this device yet.</p>
+            }
+            else
+            {
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                    <thead>
+                        <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                            <th style="padding: 0.6rem;">Port on @_device.Name</th>
+                            <th style="padding: 0.6rem;">Connected Device</th>
+                            <th style="padding: 0.6rem;">Remote Port</th>
+                            <th style="padding: 0.6rem;">Cable Label</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var link in _deviceLinks)
+                        {
+                            var isSource = link.SourceDeviceId == _device.Id;
+                            var myPort = isSource ? link.SourcePort : link.TargetPort;
+                            var otherId = isSource ? link.TargetDeviceId : link.SourceDeviceId;
+                            var otherName = isSource ? link.TargetDeviceName : link.SourceDeviceName;
+                            var otherPort = isSource ? link.TargetPort : link.SourcePort;
+
+                            <tr style="border-bottom: 1px solid #e2e8f0;">
+                                <td style="padding: 0.6rem; font-weight: bold;">Port @myPort</td>
+                                <td style="padding: 0.6rem;">
+                                    <a href="/device/@otherId" style="color: #0284c7; font-weight: 600; text-decoration: none;">@otherName →</a>
+                                </td>
+                                <td style="padding: 0.6rem;">Port @otherPort</td>
+                                <td style="padding: 0.6rem; color: #64748b;">@link.CableLabel</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem; margin-top: 1.5rem;">
+            <h3 style="margin-top: 0;">🌐 Full Path Trace (Trace Path to Internet / WAN)</h3>
+            <p style="font-size: 0.85rem; color: #64748b;">Follow the exact physical and logical path through cables, ports and switches out to WAN.</p>
+
+            <button @onclick="RunTraceAsync" style="padding: 0.5rem 1rem; background: #0284c7; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; margin-bottom: 1rem;">
+                ▶ Run Trace on Device
+            </button>
+
+            @if (_traceHops.Count > 0)
+            {
+                <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;">
+                    @foreach (var hop in _traceHops)
+                    {
+                        <div style="display: flex; align-items: center; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0.85rem;">
+                            <div style="background: #0f172a; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.85rem; margin-right: 1rem; flex-shrink: 0;">
+                                @hop.StepNumber
+                            </div>
+                            <div style="flex: 1;">
+                                <div style="font-weight: bold; font-size: 1rem;">
+                                    <a href="/device/@hop.DeviceId" style="color: #0284c7; text-decoration: none;">@hop.DeviceName</a>
+                                    <span style="font-size: 0.75rem; background: #e2e8f0; color: #334155; padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.5rem;">@hop.Category</span>
+                                </div>
+                                <div style="font-size: 0.85rem; color: #475569; margin-top: 0.2rem;">
+                                    📍 Room: @hop.Room @(!string.IsNullOrEmpty(hop.IpAddress) ? $"• IP: {hop.IpAddress}" : "")
+                                </div>
+                                @if (!string.IsNullOrEmpty(hop.CableLabel))
+                                {
+                                    <div style="font-size: 0.8rem; color: #166534; background: #f0fdf4; padding: 0.15rem 0.4rem; border-radius: 3px; display: inline-block; margin-top: 0.3rem;">
+                                        🔌 Via cable: <strong>@hop.CableLabel</strong> (Port @hop.InPort ⟷ Port @hop.OutPort)
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                        @if (hop.StepNumber < _traceHops.Count)
+                        {
+                            <div style="text-align: center; color: #94a3b8; font-size: 1.2rem; line-height: 0.5;">↓</div>
+                        }
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+
+    private HardwareDevice? _device;
+    private IHardwareUiModule? _activeModule;
+    private List<PhysicalLink> _deviceLinks = [];
+    private string? _statusMessage;
+
+    private IReadOnlyList<RoomItem> _availableRooms = [];
+    private bool _showNewRoomInput;
+    private string _newRoomName = "";
+    private IReadOnlyList<TraceHop> _traceHops = [];
+    // Credentials UI state
+    private readonly Dictionary<string, string> _credentialValues = new(StringComparer.OrdinalIgnoreCase);
+    private bool _showSecrets;
+    private bool _isTestingApi;
+    private bool _credError;
+    private string? _credStatus;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadRoomsAsync();
+        await LoadDeviceAsync();
+    }
+
+    private async Task LoadRoomsAsync()
+    {
+        _availableRooms = await RoomProvider.GetRoomsAsync();
+    }
+
+    private async Task LoadDeviceAsync()
+    {
+        _device = await HardwareProvider.GetHardwareByIdAsync(Id);
+        if (_device is null) return;
+
+        _activeModule = TypeRegistry.Resolve(_device);
+        _device = _activeModule.EnsureDeviceType(_device);
+
+        var allLinks = await PhysicalLinkProvider.GetLinksAsync();
+        _deviceLinks = allLinks.Where(l => l.SourceDeviceId == _device.Id || l.TargetDeviceId == _device.Id).ToList();
+
+        await LoadCredentialsForDeviceAsync();
+    }
+
+    private async Task LoadCredentialsForDeviceAsync()
+    {
+        if (_device is null || _activeModule is null) return;
+
+        try
+        {
+            foreach (var field in _activeModule.GetCredentialFields(_device))
+            {
+                var val = await SettingsService.GetSettingAsync($"device:{_device.Id}:{field.KeySuffix}");
+                if (string.IsNullOrWhiteSpace(val) && !string.IsNullOrWhiteSpace(field.GlobalSettingKey))
+                {
+                    val = await SettingsService.GetSettingAsync(field.GlobalSettingKey, field.GlobalSettingKey);
+                }
+                _credentialValues[field.KeySuffix] = val ?? "";
+            }
+        }
+        catch { }
+    }
+
+    private async Task OnModuleChanged(ChangeEventArgs e)
+    {
+        if (_device is null) return;
+        var moduleId = e.Value?.ToString() ?? "";
+        var selected = TypeRegistry.GetByModuleId(moduleId);
+        if (selected is not null)
+        {
+            _activeModule = selected;
+            _device = _activeModule.EnsureDeviceType(_device);
+            await LoadCredentialsForDeviceAsync();
+        }
+    }
+
+    private Dictionary<string, object?> GetEditorParameters()
+    {
+        var parameters = new Dictionary<string, object?>
+        {
+            ["Device"] = _device
+        };
+
+        // If no editor component selected, return basic params
+        if (_activeModule?.EditorComponentType is null)
+            return parameters;
+
+        // Determine the device type expected by the editor component.
+        // Prefer reading the public `Device` parameter property type if present (this will usually be the concrete TDevice).
+        Type? deviceType = null;
+        var deviceProp = _activeModule.EditorComponentType.GetProperty("Device");
+        if (deviceProp is not null)
+        {
+            deviceType = deviceProp.PropertyType;
+        }
+
+        // Fallback: inspect base types for TypedDeviceComponentBase<TDevice>
+        if (deviceType is null)
+        {
+            var t = _activeModule.EditorComponentType;
+            while (t is not null)
+            {
+                if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(NetAdmin.Core.Components.TypedDeviceComponentBase<>))
+                {
+                    deviceType = t.GetGenericArguments()[0];
+                    break;
+                }
+                t = t.BaseType!;
+            }
+        }
+
+        // Fallback to HardwareDevice if we couldn't determine a specific typed parameter
+        deviceType ??= typeof(NetAdmin.Core.Models.HardwareDevice);
+
+        // Create a strongly-typed EventCallback<TDevice> by calling a generic helper
+        var helper = GetType().GetMethod(nameof(CreateDeviceChangedCallback), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var genericHelper = helper.MakeGenericMethod(deviceType);
+        var eventCallback = genericHelper.Invoke(this, Array.Empty<object>());
+
+        parameters["DeviceChanged"] = eventCallback;
+        return parameters;
+    }
+
+    // Helper invoked by the generated, strongly-typed delegate to update the shared _device field
+    private System.Threading.Tasks.Task AssignDevice(NetAdmin.Core.Models.HardwareDevice updated)
+    {
+        _device = updated;
+        return System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    // Generic helper that creates an EventCallback<TDevice> bound to this component and assigning to _device
+    private EventCallback<TDevice> CreateDeviceChangedCallback<TDevice>() where TDevice : NetAdmin.Core.Models.HardwareDevice
+    {
+        Func<TDevice, System.Threading.Tasks.Task> handler = async updated =>
+        {
+            _device = updated!;
+            var resolved = TypeRegistry.Resolve(_device);
+            if (resolved.Category == _device.Category && resolved.ModuleId != _activeModule?.ModuleId)
+            {
+                _activeModule = resolved;
+            }
+            await LoadCredentialsForDeviceAsync();
+        };
+
+        return EventCallback.Factory.Create<TDevice>(this, handler);
+    }
+
+    private async Task UpdateTopLevelVendor(string vendor)
+    {
+        if (_device is null) return;
+        _device = _device switch
+        {
+            WanHardwareDevice wan => wan with { IspName = vendor, Vendor = vendor },
+            _ => _device with { Vendor = vendor }
+        };
+        var resolved = TypeRegistry.Resolve(_device);
+        if (resolved.Category == _device.Category && resolved.ModuleId != _activeModule?.ModuleId)
+        {
+            _activeModule = resolved;
+        }
+        await LoadCredentialsForDeviceAsync();
+    }
+
+    private void UpdateTopLevelModel(string model)
+    {
+        if (_device is null) return;
+        _device = _device switch
+        {
+            ShellyHardwareDevice sh => sh with { ShellyModel = model, Model = model },
+            SwitchHardwareDevice sw => sw with { SwitchModel = model, Model = model },
+            IoTHubHardwareDevice hub => hub with { HubModel = model, Model = model },
+            EnergyMeterHardwareDevice meter => meter with { MeterModel = model, Model = model },
+            FiberConverterHardwareDevice fc => fc with { ConverterModel = model, Model = model },
+            _ => _device with { Model = model }
+        };
+    }
+
+    private async Task SaveChangesAsync()
+    {
+        if (_device is null) return;
+
+        if (_activeModule is not null)
+        {
+            _device = _activeModule.EnsureDeviceType(_device);
+        }
+
+        await HardwareProvider.SaveHardwareAsync(_device);
+        _statusMessage = "✅ Device updated successfully!";
+        await LoadDeviceAsync();
+    }
+
+    private async Task DeleteDeviceAsync()
+    {
+        if (_device is null) return;
+        await HardwareProvider.DeleteHardwareAsync(_device.Id);
+        Navigation.NavigateTo("/hardware");
+    }
+
+    private async Task CreateNewRoomAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newRoomName) || _device is null) return;
+
+        var newRoom = new RoomItem(
+            Id: $"room-{Guid.NewGuid().ToString("N")[..6]}",
+            Name: _newRoomName.Trim(),
+            BuildingOrZone: "Main House",
+            Floor: "Ground Floor"
+        );
+
+        await RoomProvider.SaveRoomAsync(newRoom);
+        _device = _device with { Room = newRoom.Name };
+        _newRoomName = "";
+        _showNewRoomInput = false;
+        await LoadRoomsAsync();
+    }
+
+    private async Task SaveCredentialsAsync()
+    {
+        if (_device is null || _activeModule is null) return;
+
+        foreach (var field in _activeModule.GetCredentialFields(_device))
+        {
+            _credentialValues.TryGetValue(field.KeySuffix, out var rawVal);
+            var normalized = string.IsNullOrWhiteSpace(rawVal) ? null : rawVal.Trim();
+            await SettingsService.SaveSettingAsync($"device:{_device.Id}:{field.KeySuffix}", normalized);
+
+            if (!string.IsNullOrWhiteSpace(field.GlobalSettingKey) && normalized is not null)
+            {
+                await SettingsService.SaveSettingAsync(field.GlobalSettingKey, normalized);
+            }
+        }
+
+        _credError = false;
+        _credStatus = "✅ Encrypted credentials saved for this device.";
+    }
+
+    private async Task SaveAndTestApiConnectionAsync()
+    {
+        if (_device is null || _activeModule is null) return;
+
+        _isTestingApi = true;
+        _credStatus = null;
+        StateHasChanged();
+
+        try
+        {
+            await SaveCredentialsAsync();
+
+            var fields = _activeModule.GetCredentialFields(_device);
+            if (fields.Any(f => f.GlobalSettingKey?.StartsWith("OpnSense:") == true))
+            {
+                var provider = RoutingProviders.FirstOrDefault();
+                var ok = provider is not null && await provider.TestConnectionAsync();
+                _credError = !ok;
+                _credStatus = ok
+                    ? "✅ Credentials saved and OPNsense API connection verified!"
+                    : "❌ Credentials saved, but OPNsense API connection failed. Check URL, key, and secret.";
+            }
+            else if (fields.Any(f => f.GlobalSettingKey?.StartsWith("UniFi:") == true))
+            {
+                var provider = WirelessProviders.FirstOrDefault();
+                var ok = provider is not null && await provider.TestConnectionAsync();
+                _credError = !ok;
+                _credStatus = ok
+                    ? "✅ Credentials saved and UniFi Controller connection verified!"
+                    : "❌ Credentials saved, but UniFi Controller connection failed. Check URL and credentials.";
+            }
+            else if (fields.Any(f => f.GlobalSettingKey?.StartsWith("Frigate:") == true))
+            {
+                var provider = FrigateProviders.FirstOrDefault();
+                var status = provider is not null ? await provider.GetStatusAsync(_device.Id, _device.IpAddress) : null;
+                _credError = status is null;
+                _credStatus = status is not null
+                    ? $"✅ Credentials saved and Frigate v{status.Version} verified ({status.CameraCount} cameras)!"
+                    : "❌ Credentials saved, but Frigate API connection failed. Check Base URL and token.";
+            }
+            else if (fields.Any(f => f.GlobalSettingKey?.StartsWith("HomeAssistant:") == true))
+            {
+                var provider = HomeAssistantProviders.FirstOrDefault();
+                var status = provider is not null ? await provider.GetStatusAsync(_device.Id, _device.IpAddress) : null;
+                _credError = status is null;
+                _credStatus = status is not null
+                    ? $"✅ Credentials saved and Home Assistant v{status.Version} ({status.LocationName}) verified!"
+                    : "❌ Credentials saved, but Home Assistant API connection failed. Check Base URL and Long-Lived Access Token.";
+            }
+        }
+        finally
+        {
+            _isTestingApi = false;
+        }
+    }
+
+    private async Task RunTraceAsync()
+    {
+        if (_device is null) return;
+        _traceHops = await TraceService.TracePathAsync(_device.Id);
+    }
+}

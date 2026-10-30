@@ -1,0 +1,137 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using NetAdmin.Core.Models
+@using NetAdmin.Providers.TpLink.Products
+@inject ProductCatalogRegistry Catalog
+
+@if (Device is SwitchHardwareDevice sw)
+{
+    var vendors = Catalog.GetVendorsByCategory(HardwareCategory.Switch);
+    var matchedVendor = vendors.FirstOrDefault(v => v.Equals(sw.Vendor, StringComparison.OrdinalIgnoreCase));
+    var vendorSelectValue = _customVendorMode || matchedVendor is null ? "__custom__" : matchedVendor;
+    var vendorModels = matchedVendor is not null ? Catalog.GetByCategoryAndVendor(HardwareCategory.Switch, matchedVendor) : [];
+    var selectedProduct = !_customModelMode ? vendorModels.FirstOrDefault(p => p.MatchesCodeOrModel(sw.SwitchModel)) : null;
+    var modelSelectValue = selectedProduct?.ProductId ?? "__custom__";
+
+    <div class="card card--muted">
+        <h4 class="card-header">🖧 Switch Properties</h4>
+        <div class="card-grid">
+            <div>
+                <label class="form-label">1. Manufacturer (Catalog)</label>
+                <select value="@vendorSelectValue"
+                        @onchange="@(e => OnVendorSelected(sw, e.Value?.ToString()))"
+                        class="form-select">
+                    @foreach (var vendor in vendors)
+                    {
+                        <option value="@vendor">@vendor</option>
+                    }
+                    <option value="__custom__">-- Custom / Other Manufacturer --</option>
+                </select>
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">2. Model (Catalog)</label>
+                <select value="@modelSelectValue"
+                        @onchange="@(e => OnCatalogProductSelected(sw, e.Value?.ToString()))"
+                        style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white;">
+                    @foreach (var prod in vendorModels)
+                    {
+                        <option value="@prod.ProductId">@prod.Model (@prod.DefaultPortCount ports)</option>
+                    }
+                    <option value="__custom__">-- Custom / Other Model (free text) --</option>
+                </select>
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Manufacturer (Free Text)</label>
+                <input value="@sw.Vendor"
+                       @oninput="@(e => OnCustomVendorInput(sw, e.Value?.ToString() ?? ""))"
+                       placeholder="TP-Link / Netgear / Ubiquiti..."
+                       class="form-input" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Model (Free Text)</label>
+                <input value="@sw.SwitchModel"
+                       @oninput="@(e => OnCustomModelInput(sw, e.Value?.ToString() ?? ""))"
+                       placeholder="TL-SG108PE / 8-Port Gigabit"
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Physical Switch Ports</label>
+                <input type="number" min="2" max="48"
+                       value="@sw.PortCount"
+                       @onchange="@(e => UpdateSwitch(sw with { PortCount = int.TryParse(e.Value?.ToString(), out var p) ? p : 8 }))"
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; padding-bottom: 0.4rem;">
+                <input type="checkbox" id="chkManagedSwitch"
+                       checked="@sw.IsManaged"
+                       @onchange="@(e => UpdateSwitch(sw with { IsManaged = e.Value is bool b && b }))" />
+                <label for="chkManagedSwitch" style="font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+                    Managed / Smart Switch (802.1Q VLAN Support)
+                </label>
+            </div>
+        </div>
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.TypedDeviceComponentBase<NetAdmin.Core.Models.SwitchHardwareDevice>
+
+@code {
+    private bool _customVendorMode;
+    private bool _customModelMode;
+
+    private Task OnVendorSelected(SwitchHardwareDevice current, string? vendor)
+    {
+        if (string.IsNullOrWhiteSpace(vendor) || vendor == "__custom__")
+        {
+            _customVendorMode = true;
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customVendorMode = false;
+        _customModelMode = false;
+
+        var firstModel = Catalog.GetByCategoryAndVendor(HardwareCategory.Switch, vendor).FirstOrDefault();
+        if (firstModel is not null)
+        {
+            return OnCatalogProductSelected(current, firstModel.ProductId);
+        }
+
+        return UpdateSwitch(current with { Vendor = vendor });
+    }
+
+    private Task OnCatalogProductSelected(SwitchHardwareDevice current, string? productId)
+    {
+        if (string.IsNullOrWhiteSpace(productId) || productId == "__custom__")
+        {
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customModelMode = false;
+        var product = Catalog.GetById(productId);
+        if (product is null)
+            return Task.CompletedTask;
+
+        return UpdateSwitch((SwitchHardwareDevice)product.ApplyToDevice(current));
+    }
+
+    private Task OnCustomVendorInput(SwitchHardwareDevice current, string vendor)
+    {
+        _customVendorMode = !Catalog.GetVendorsByCategory(HardwareCategory.Switch)
+            .Any(v => v.Equals(vendor, StringComparison.OrdinalIgnoreCase));
+        return UpdateSwitch(current with { Vendor = vendor });
+    }
+
+    private Task OnCustomModelInput(SwitchHardwareDevice current, string model)
+    {
+        _customModelMode = true;
+        return UpdateSwitch(current with { SwitchModel = model, Model = model });
+    }
+
+    private Task UpdateSwitch(SwitchHardwareDevice updated)
+    {
+        // Use the helper from the base class to set Device and invoke change callbacks
+        return NotifyDeviceChanged(updated);
+    }
+}

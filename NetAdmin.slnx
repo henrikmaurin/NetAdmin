@@ -1,0 +1,31 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="docker-compose.yml" />
+    <File Path="Dockerfile" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/NetAdmin.Core/NetAdmin.Core.csproj" />
+    <Project Path="src/NetAdmin.Infrastructure/NetAdmin.Infrastructure.csproj" />
+    <Project Path="src/NetAdmin.Web/NetAdmin.Web.csproj" />
+  </Folder>
+    <Folder Name="/src/Providers/">
+    <Project Path="src/NetAdmin.Providers.Apple/NetAdmin.Providers.Apple.csproj" />
+    <Project Path="src/NetAdmin.Providers.Asus/NetAdmin.Providers.Asus.csproj" />
+    <Project Path="src/NetAdmin.Providers.Dell/NetAdmin.Providers.Dell.csproj" />
+    <Project Path="src/NetAdmin.Providers.Epson/NetAdmin.Providers.Epson.csproj" />
+      <Project Path="src/NetAdmin.Providers.Frigate/NetAdmin.Providers.Frigate.csproj" />
+    <Project Path="src/NetAdmin.Providers.Google/NetAdmin.Providers.Google.csproj" />
+      <Project Path="src/NetAdmin.Providers.HomeAssistant/NetAdmin.Providers.HomeAssistant.csproj" />
+    <Project Path="src/NetAdmin.Providers.HomeWizard/NetAdmin.Providers.HomeWizard.csproj" />
+    <Project Path="src/NetAdmin.Providers.Ikea/NetAdmin.Providers.Ikea.csproj" />
+    <Project Path="src/NetAdmin.Providers.OpnSense/NetAdmin.Providers.OpnSense.csproj" />
+    <Project Path="src/NetAdmin.Providers.Samsung/NetAdmin.Providers.Samsung.csproj" />
+    <Project Path="src/NetAdmin.Providers.Shelly/NetAdmin.Providers.Shelly.csproj" />
+    <Project Path="src/NetAdmin.Providers.TpLink/NetAdmin.Providers.TpLink.csproj" />
+    <Project Path="src/NetAdmin.Providers.PfSense/NetAdmin.Providers.PfSense.csproj" />
+    <Project Path="src/NetAdmin.Providers.OpenWrt/NetAdmin.Providers.OpenWrt.csproj" />
+    <Project Path="src/NetAdmin.Providers.UniFi/NetAdmin.Providers.UniFi.csproj" />
+    <Project Path="src/NetAdmin.Providers.Xiaomi/NetAdmin.Providers.Xiaomi.csproj" />
+    <Project Path="src/NetAdmin.Providers.Yamaha/NetAdmin.Providers.Yamaha.csproj" />
+  </Folder>
+</Solution>

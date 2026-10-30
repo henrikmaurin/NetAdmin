@@ -1,0 +1,197 @@
+@page "/catalog"
+@rendermode InteractiveServer
+@using NetAdmin.Core.Models
+@using NetAdmin.Core.Providers
+@inject ProductCatalogRegistry Catalog
+@inject IShellyProvider ShellyProvider
+
+<PageTitle>Product Catalog</PageTitle>
+
+<div style="font-family: system-ui, sans-serif; max-width: 1400px; margin: 0 auto; padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <div>
+            <a href="/" style="color: #2563eb; text-decoration: none; font-size: 0.9rem;">← Back to Dashboard</a>
+            <h1 style="margin: 0.25rem 0 0 0;">📦 Product Catalog (@Catalog.AllProducts.Count Models)</h1>
+            <small style="color: #64748b;">
+                Strongly typed product catalog with one C# class per product (<code>HardwareProductDefinition</code>), organized by Manufacturer and Model.
+            </small>
+        </div>
+        <a href="/hardware"
+           style="padding: 0.6rem 1.2rem; background: #0284c7; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
+            🖧 Hardware & Cabling
+        </a>
+    </div>
+
+    <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h3 style="margin: 0 0 0.5rem 0; color: #0369a1;">🔍 Live Shelly Device Probe</h3>
+        <p style="margin: 0 0 0.75rem 0; font-size: 0.85rem; color: #0c4a6e;">
+            Enter the IP address of a Shelly device to query <code>http://{ip}/shelly</code> and identify which product class it matches.
+        </p>
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <input @bind="_testIp"
+                   placeholder="192.168.1.50"
+                   style="padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; min-width: 240px;" />
+            <button @onclick="ProbeTestDeviceAsync"
+                    disabled="@(_isProbing || string.IsNullOrWhiteSpace(_testIp))"
+                    style="background: #0284c7; color: white; border: none; padding: 0.55rem 1rem; border-radius: 6px; font-weight: 600; cursor: pointer;">
+                @(_isProbing ? "⏳ Probing device..." : "🔍 Identify Product by IP")
+            </button>
+        </div>
+
+        @if (_probeResult is not null)
+        {
+            <div style="margin-top: 1rem; background: white; border: 1px solid #7dd3fc; border-radius: 6px; padding: 0.85rem; font-size: 0.85rem;">
+                <div><strong>Device Name:</strong> @(_probeResult.DeviceName ?? "-") | <strong>MAC:</strong> <code>@(_probeResult.MacAddress ?? "-")</code></div>
+                <div><strong>Raw Device Code from API:</strong> <code>@_probeResult.RawModelCode</code> (App: <code>@(_probeResult.AppCode ?? "-")</code>, Gen @_probeResult.Generation, FW: <code>@(_probeResult.FirmwareVersion ?? "-")</code>)</div>
+                <div style="margin-top: 0.35rem;">
+                    <strong>Matched Product Class:</strong>
+                    @if (_probeResult.MatchedProduct is not null)
+                    {
+                        <span style="color: #166534; font-weight: 700;">
+                            ✅ @_probeResult.MatchedProduct.GetType().Name (@_probeResult.MatchedProduct.Vendor — @_probeResult.MatchedProduct.Model)
+                        </span>
+                    }
+                    else
+                    {
+                        <span style="color: #b45309; font-weight: 600;">
+                            ⚠️ No exact product class found for '@_probeResult.RawModelCode' (using fallback Shelly @_probeResult.FriendlyModel).
+                        </span>
+                    }
+                </div>
+            </div>
+        }
+        else if (!string.IsNullOrWhiteSpace(_probeError))
+        {
+            <div style="margin-top: 0.75rem; color: #991b1b; font-size: 0.85rem; font-weight: 600;">
+                @_probeError
+            </div>
+        }
+    </div>
+
+    <div style="display: flex; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap;">
+        <input @bind="_search" @bind:event="oninput"
+               placeholder="Search manufacturer, model, product class or device code..."
+               style="flex: 1; min-width: 260px; padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+
+        <select @bind="_selectedVendor" style="padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+            <option value="">All Manufacturers (@Vendors.Count)</option>
+            @foreach (var v in Vendors)
+            {
+                <option value="@v">@v</option>
+            }
+        </select>
+
+        <select @bind="_selectedCategory" style="padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+            <option value="">All Categories</option>
+            @foreach (var cat in Categories)
+            {
+                <option value="@cat">@cat.ToDisplayName()</option>
+            }
+        </select>
+    </div>
+
+    @foreach (var vendorGroup in FilteredProducts.GroupBy(p => p.Vendor))
+    {
+        <div style="margin-bottom: 2rem;">
+            <h2 style="margin: 0 0 0.75rem 0; padding-bottom: 0.4rem; border-bottom: 2px solid #e2e8f0; color: #0f172a;">
+                🏭 @vendorGroup.Key <span style="font-size: 0.9rem; color: #64748b; font-weight: normal;">(@vendorGroup.Count() models)</span>
+            </h2>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 1rem;">
+                @foreach (var prod in vendorGroup.OrderBy(p => p.Model))
+                {
+                    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+                        <div style="display: flex; justify-content: space-between; align-items: start; gap: 0.5rem;">
+                            <div>
+                                <div style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: #64748b;">@prod.Vendor</div>
+                                <div style="font-weight: 700; font-size: 1.05rem; color: #0f172a;">@prod.Model</div>
+                                <div style="font-size: 0.75rem; color: #64748b; font-family: monospace;">Class: @prod.GetType().Name</div>
+                            </div>
+                            <span style="background: #f1f5f9; color: #334155; font-size: 0.72rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 600;">
+                                @prod.Category.ToDisplayName() @(prod.Generation > 0 ? $"• Gen {prod.Generation}" : "")
+                            </span>
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(prod.Description))
+                        {
+                            <p style="margin: 0.5rem 0; font-size: 0.83rem; color: #475569;">@prod.Description</p>
+                        }
+
+                        <div style="font-size: 0.78rem; color: #334155; margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
+                            @if (prod.DeviceCodes.Count > 0)
+                            {
+                                <div>
+                                    <strong>Device Codes:</strong>
+                                    @foreach (var devCode in prod.DeviceCodes)
+                                    {
+                                        <code style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 0.1rem 0.35rem; border-radius: 3px; margin-right: 0.25rem;">@devCode</code>
+                                    }
+                                </div>
+                            }
+                            <div>
+                                <strong>LAN Ports:</strong> @prod.DefaultPortCount |
+                                <strong>Tags:</strong> <span style="color: #0369a1;">@prod.DefaultTagsCsv</span>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private string _search = "";
+    private string _selectedVendor = "";
+    private string _selectedCategory = "";
+
+    private string _testIp = "";
+    private bool _isProbing;
+    private ShellyProbedInfo? _probeResult;
+    private string? _probeError;
+
+    private IReadOnlyList<string> Vendors =>
+        Catalog.AllProducts.Select(p => p.Vendor).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v).ToList();
+
+    private IReadOnlyList<HardwareCategory> Categories =>
+        Catalog.AllProducts.Select(p => p.Category).Distinct().OrderBy(c => c.ToString()).ToList();
+
+    private IEnumerable<HardwareProductDefinition> FilteredProducts =>
+        Catalog.AllProducts.Where(p =>
+        {
+            if (!string.IsNullOrWhiteSpace(_selectedVendor) && !p.Vendor.Equals(_selectedVendor, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (!string.IsNullOrWhiteSpace(_selectedCategory) && !p.Category.ToString().Equals(_selectedCategory, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (string.IsNullOrWhiteSpace(_search))
+                return true;
+
+            return p.FullName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                   p.GetType().Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                   p.SubCategory.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                   p.Description.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                   p.DefaultTagsCsv.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                   p.DeviceCodes.Any(c => c.Contains(_search, StringComparison.OrdinalIgnoreCase));
+        });
+
+    private async Task ProbeTestDeviceAsync()
+    {
+        _isProbing = true;
+        _probeResult = null;
+        _probeError = null;
+        try
+        {
+            _probeResult = await ShellyProvider.ProbeDeviceAsync(_testIp);
+            if (_probeResult is null)
+            {
+                _probeError = $"Could not reach any Shelly device at '{_testIp}' (/shelly did not respond).";
+            }
+        }
+        finally
+        {
+            _isProbing = false;
+        }
+    }
+}

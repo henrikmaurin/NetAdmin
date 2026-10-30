@@ -1,0 +1,221 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using NetAdmin.Core.Models
+@using NetAdmin.Infrastructure.Products
+@inject ProductCatalogRegistry Catalog
+
+@if (Device is CameraHardwareDevice cam)
+{
+    var vendors = Catalog.GetVendorsByCategory(HardwareCategory.Camera);
+    var matchedVendor = vendors.FirstOrDefault(v => v.Equals(cam.Vendor, StringComparison.OrdinalIgnoreCase));
+    var vendorSelectValue = _customVendorMode || matchedVendor is null ? "__custom__" : matchedVendor;
+    var vendorModels = matchedVendor is not null ? Catalog.GetByCategoryAndVendor(HardwareCategory.Camera, matchedVendor) : [];
+    var selectedProduct = !_customModelMode ? vendorModels.FirstOrDefault(p => p.MatchesCodeOrModel(cam.Model)) : null;
+    var modelSelectValue = selectedProduct?.ProductId ?? "__custom__";
+    var streams = cam.EffectiveStreams.ToList();
+
+    <div class="card card--purple">
+        <h4 class="card-header">📷 Camera Settings & Streams</h4>
+        <div class="card-grid" style="margin-bottom:1rem;">
+            <div>
+                <label class="form-label">1. Manufacturer (Catalog)</label>
+                <select value="@vendorSelectValue"
+                        @onchange="@(e => OnVendorSelected(cam, e.Value?.ToString()))"
+                        class="form-select">
+                    @foreach (var vendor in vendors)
+                    {
+                        <option value="@vendor">@vendor</option>
+                    }
+                    <option value="__custom__">-- Custom / Other Manufacturer --</option>
+                </select>
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">2. Model (Catalog)</label>
+                <select value="@modelSelectValue"
+                        @onchange="@(e => OnCatalogProductSelected(cam, e.Value?.ToString()))"
+                        style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white;">
+                    @foreach (var prod in vendorModels)
+                    {
+                        <option value="@prod.ProductId">@prod.Model (@(prod.DefaultPortCount > 0 ? "PoE/LAN" : "Wi-Fi"))</option>
+                    }
+                    <option value="__custom__">-- Custom / Other Model (free text) --</option>
+                </select>
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Manufacturer (Free Text)</label>
+                <input value="@cam.Vendor"
+                       @oninput="@(e => OnCustomVendorInput(cam, e.Value?.ToString() ?? ""))"
+                       placeholder="Reolink / TP-Link / Hikvision..."
+                       class="form-input" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Model (Free Text)</label>
+                <input value="@cam.Model"
+                       @oninput="@(e => OnCustomModelInput(cam, e.Value?.ToString() ?? ""))"
+                       placeholder="RLC-810A / Tapo C210"
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+        </div>
+
+        <div style="border-top: 1px dashed #d8b4fe; padding-top: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <label style="font-size: 0.8rem; font-weight: 600; color: #581c87;">
+                    📹 Video Streams (@streams.Count)
+                </label>
+                <button type="button"
+                        @onclick="() => AddStream(cam)"
+                        style="background: #7c3aed; color: white; border: none; padding: 0.25rem 0.65rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">
+                    + Add Stream
+                </button>
+            </div>
+
+            @if (streams.Count == 0)
+            {
+                <div style="font-size: 0.8rem; color: #64748b; font-style: italic;">
+                    No streams configured yet. Click "+ Add Stream" or select a camera model above to populate default streams.
+                </div>
+            }
+            else
+            {
+                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    @for (int i = 0; i < streams.Count; i++)
+                    {
+                        var idx = i;
+                        var stream = streams[idx];
+                        <div style="display: grid; grid-template-columns: 150px 100px 1fr 120px auto; gap: 0.5rem; align-items: center; background: white; padding: 0.4rem; border-radius: 4px; border: 1px solid #e2e8f0;">
+                            <input value="@stream.Name"
+                                   @oninput="@(e => UpdateStream(cam, idx, stream with { Name = e.Value?.ToString() ?? "" }))"
+                                   placeholder="Main Stream / Sub Stream"
+                                   style="padding: 0.35rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.8rem;" />
+                            <select value="@stream.Protocol"
+                                    @onchange="@(e => UpdateStream(cam, idx, stream with { Protocol = e.Value?.ToString() ?? "RTSP" }))"
+                                    style="padding: 0.35rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.8rem; background: white;">
+                                <option value="RTSP">RTSP</option>
+                                <option value="ONVIF">ONVIF</option>
+                                <option value="RTMP">RTMP</option>
+                                <option value="HTTP">HTTP/FLV</option>
+                                <option value="WebRTC">WebRTC</option>
+                            </select>
+                            <input value="@stream.Url"
+                                   @oninput="@(e => UpdateStream(cam, idx, stream with { Url = e.Value?.ToString() ?? "" }))"
+                                   placeholder="rtsp://192.168.1.x:554/h264Preview_01_main"
+                                   style="padding: 0.35rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.8rem; font-family: monospace;" />
+                            <input value="@stream.Resolution"
+                                   @oninput="@(e => UpdateStream(cam, idx, stream with { Resolution = e.Value?.ToString() ?? "" }))"
+                                   placeholder="4K / 640x360"
+                                   style="padding: 0.35rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.8rem;" />
+                            <button type="button"
+                                    @onclick="() => RemoveStream(cam, idx)"
+                                    title="Remove stream"
+                                    style="background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; padding: 0.3rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">
+                                ✕
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.TypedDeviceComponentBase<NetAdmin.Core.Models.CameraHardwareDevice>
+
+@code {
+    private bool _customVendorMode;
+    private bool _customModelMode;
+
+    private Task OnVendorSelected(CameraHardwareDevice current, string? vendor)
+    {
+        if (string.IsNullOrWhiteSpace(vendor) || vendor == "__custom__")
+        {
+            _customVendorMode = true;
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customVendorMode = false;
+        _customModelMode = false;
+
+        var firstModel = Catalog.GetByCategoryAndVendor(HardwareCategory.Camera, vendor).FirstOrDefault();
+        if (firstModel is not null)
+        {
+            return OnCatalogProductSelected(current, firstModel.ProductId);
+        }
+
+        return NotifyDeviceChanged(current with { Vendor = vendor });
+    }
+
+    private Task OnCatalogProductSelected(CameraHardwareDevice current, string? productId)
+    {
+        if (string.IsNullOrWhiteSpace(productId) || productId == "__custom__")
+        {
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customModelMode = false;
+        var product = Catalog.GetById(productId);
+        if (product is null)
+            return Task.CompletedTask;
+
+        var applied = product.ApplyToDevice(current with { Streams = null });
+        if (applied is CameraHardwareDevice appliedCam)
+        {
+        return NotifyDeviceChanged(appliedCam);
+        }
+
+        return NotifyDeviceChanged(current with
+        {
+            Vendor = applied.Vendor,
+            Model = applied.Model,
+            PortCount = applied.PortCount,
+            TagsCsv = applied.TagsCsv
+        });
+    }
+
+    private Task OnCustomVendorInput(CameraHardwareDevice current, string vendor)
+    {
+        _customVendorMode = !Catalog.GetVendorsByCategory(HardwareCategory.Camera)
+            .Any(v => v.Equals(vendor, StringComparison.OrdinalIgnoreCase));
+        return NotifyDeviceChanged(current with { Vendor = vendor });
+    }
+
+    private Task OnCustomModelInput(CameraHardwareDevice current, string model)
+    {
+        _customModelMode = true;
+        return NotifyDeviceChanged(current with { Model = model });
+    }
+
+    private Task AddStream(CameraHardwareDevice cam)
+    {
+        var list = cam.EffectiveStreams.ToList();
+        var nextIndex = list.Count + 1;
+        list.Add(new CameraStreamDefinition(
+            nextIndex == 1 ? "Main Stream" : nextIndex == 2 ? "Sub Stream" : $"Stream {nextIndex}",
+            "/stream" + nextIndex,
+            "RTSP",
+            nextIndex == 1 ? "4K / High" : "SD / Low"));
+        return NotifyDeviceChanged(cam with { Streams = list, RtspPath = list.FirstOrDefault()?.Url });
+    }
+
+    private Task UpdateStream(CameraHardwareDevice cam, int index, CameraStreamDefinition updatedStream)
+    {
+        var list = cam.EffectiveStreams.ToList();
+        if (index >= 0 && index < list.Count)
+        {
+            list[index] = updatedStream;
+        }
+        return NotifyDeviceChanged(cam with { Streams = list, RtspPath = list.FirstOrDefault()?.Url });
+    }
+
+    private Task RemoveStream(CameraHardwareDevice cam, int index)
+    {
+        var list = cam.EffectiveStreams.ToList();
+        if (index >= 0 && index < list.Count)
+        {
+            list.RemoveAt(index);
+        }
+        return NotifyDeviceChanged(cam with { Streams = list, RtspPath = list.FirstOrDefault()?.Url });
+    }
+
+}

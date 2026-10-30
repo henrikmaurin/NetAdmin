@@ -1,0 +1,17 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+
+@if (Device is CameraHardwareDevice cam)
+{
+    <div class="card-summary card-summary--camera">
+        📷 @cam.Vendor @cam.Model
+        @if (cam.EffectiveStreams.Count > 0)
+        {
+            <span style="margin-left: 0.35rem; background: #f3e8ff; color: #6b21a8; padding: 0.1rem 0.4rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600;">
+                @cam.EffectiveStreams.Count @(cam.EffectiveStreams.Count == 1 ? "stream" : "streams")
+            </span>
+        }
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase

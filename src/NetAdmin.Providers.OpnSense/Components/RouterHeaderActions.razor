@@ -1,0 +1,26 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+
+@if (Device.Category == HardwareCategory.Router)
+{
+    if (Compact)
+    {
+        @AnchorAction($"/switch/{Device.Id}", "Open Port & VLAN Overview", "🔌", "primary")
+
+        @if (Device.Vendor.Contains("OPNsense", StringComparison.OrdinalIgnoreCase) || Device.TagsCsv.Contains("opnsense", StringComparison.OrdinalIgnoreCase) || Device.Id.Contains("opnsense", StringComparison.OrdinalIgnoreCase))
+        {
+            @AnchorAction("/setup", "OPNsense API Settings", "🔥", "accent")
+        }
+    }
+    else
+    {
+        @AnchorAction($"/switch/{Device.Id}", "Open Port & VLAN Overview", "🔌 Open Port & VLAN Overview", "primary")
+
+        @if (Device.Vendor.Contains("OPNsense", StringComparison.OrdinalIgnoreCase) || Device.TagsCsv.Contains("opnsense", StringComparison.OrdinalIgnoreCase) || Device.Id.Contains("opnsense", StringComparison.OrdinalIgnoreCase))
+        {
+            @AnchorAction("/setup", "OPNsense API Settings", "🔥 OPNsense API Settings", "accent")
+        }
+    }
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase

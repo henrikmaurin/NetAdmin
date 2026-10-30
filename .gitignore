@@ -1,0 +1,31 @@
+## Visual Studio / .NET build artifacts
+.vs/
+bin/
+obj/
+out/
+publish/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+*.nupkg
+*.snupkg
+
+## Local SQLite databases & app data
+appdata/
+**/data/
+*.db
+*.db-shm
+*.db-wal
+
+## Local developer settings & secrets
+.env
+.env.*
+!.env.example
+**/appsettings.Development.json
+**/appsettings.Local.json
+!**/appsettings.Development.example.json
+
+## Local personal seed data
+**/seed.local.json
+!**/seed.example.json

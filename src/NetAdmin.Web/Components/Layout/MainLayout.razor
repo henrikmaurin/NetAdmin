@@ -1,0 +1,70 @@
+﻿@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+@using NetAdmin.Core.Services
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IAdminAuthService AdminAuthService
+@inject NavigationManager Navigation
+
+@if (_isAuthenticated)
+{
+    <div style="font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; padding: 0.45rem 1.5rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem;">
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <a href="/" style="color: white; text-decoration: none; font-weight: 700;">🛡️ NetAdmin</a>
+            <a href="/hardware" style="color: #cbd5e1; text-decoration: none;">Hardware Inventory</a>
+            <a href="/services" style="color: #cbd5e1; text-decoration: none;">Services</a>
+            <a href="/rooms" style="color: #cbd5e1; text-decoration: none;">Rooms</a>
+            <a href="/setup" style="color: #cbd5e1; text-decoration: none;">Settings</a>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.85rem;">
+            <span style="color: #94a3b8;">👤 @_username</span>
+            <a href="/auth/logout"
+               style="padding: 0.25rem 0.65rem; background: #334155; color: white; text-decoration: none; border-radius: 4px; font-weight: 600;">
+                Sign Out
+            </a>
+        </div>
+    </div>
+}
+
+@Body
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private bool _isAuthenticated;
+    private string _username = "admin";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var relativePath = "/" + Navigation.ToBaseRelativePath(Navigation.Uri);
+        var isOnboardingRoute = relativePath.StartsWith("/onboarding", StringComparison.OrdinalIgnoreCase);
+        var isLoginRoute = relativePath.StartsWith("/login", StringComparison.OrdinalIgnoreCase);
+
+        var isOnboarded = await AdminAuthService.IsOnboardingCompletedAsync();
+        if (!isOnboarded)
+        {
+            _isAuthenticated = false;
+            if (!isOnboardingRoute)
+            {
+                Navigation.NavigateTo("/onboarding", forceLoad: true);
+            }
+            return;
+        }
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _isAuthenticated = user.Identity?.IsAuthenticated == true;
+
+        if (_isAuthenticated)
+        {
+            _username = user.Identity?.Name ?? "admin";
+        }
+        else if (!isLoginRoute)
+        {
+            Navigation.NavigateTo("/login", forceLoad: true);
+        }
+    }
+}

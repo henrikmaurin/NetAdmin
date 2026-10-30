@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetAdmin.Core\NetAdmin.Core.csproj" />
+    <ProjectReference Include="..\NetAdmin.Infrastructure\NetAdmin.Infrastructure.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Apple\NetAdmin.Providers.Apple.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Asus\NetAdmin.Providers.Asus.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Dell\NetAdmin.Providers.Dell.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Epson\NetAdmin.Providers.Epson.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Frigate\NetAdmin.Providers.Frigate.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Google\NetAdmin.Providers.Google.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.HomeAssistant\NetAdmin.Providers.HomeAssistant.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.HomeWizard\NetAdmin.Providers.HomeWizard.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Ikea\NetAdmin.Providers.Ikea.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.OpenWrt\NetAdmin.Providers.OpenWrt.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.OpnSense\NetAdmin.Providers.OpnSense.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.PfSense\NetAdmin.Providers.PfSense.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Samsung\NetAdmin.Providers.Samsung.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.UniFi\NetAdmin.Providers.UniFi.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.TpLink\NetAdmin.Providers.TpLink.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Shelly\NetAdmin.Providers.Shelly.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Xiaomi\NetAdmin.Providers.Xiaomi.csproj" />
+    <ProjectReference Include="..\NetAdmin.Providers.Yamaha\NetAdmin.Providers.Yamaha.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+</Project>

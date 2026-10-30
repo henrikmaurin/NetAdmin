@@ -1,0 +1,7 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+@inherits NetAdmin.Core.Components.DeviceComponentBase
+
+<div class="card-summary">
+    🏡 @(string.IsNullOrWhiteSpace(Device.Vendor) ? "Home Automation" : Device.Vendor) @(string.IsNullOrWhiteSpace(Device.Model) ? "" : $"• {Device.Model}")
+</div>

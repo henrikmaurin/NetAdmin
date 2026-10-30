@@ -1,0 +1,220 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using NetAdmin.Core.Models
+@using NetAdmin.Core.Providers
+@inject ProductCatalogRegistry Catalog
+@inject IHomeWizardProvider HomeWizardProvider
+
+@if (Device is EnergyMeterHardwareDevice meter)
+{
+    var vendors = Catalog.GetVendorsByCategory(HardwareCategory.EnergyMeter);
+    var matchedVendor = vendors.FirstOrDefault(v => v.Equals(meter.Vendor, StringComparison.OrdinalIgnoreCase));
+    var vendorSelectValue = _customVendorMode || matchedVendor is null ? "__custom__" : matchedVendor;
+    var vendorModels = matchedVendor is not null ? Catalog.GetByCategoryAndVendor(HardwareCategory.EnergyMeter, matchedVendor) : [];
+    var selectedProduct = !_customModelMode ? vendorModels.FirstOrDefault(p => p.MatchesCodeOrModel(meter.MeterModel)) : null;
+    var modelSelectValue = selectedProduct?.ProductId ?? "__custom__";
+
+    <div class="card card--green">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+            <h4 class="card-header">📊 Energy Meter Properties</h4>
+            <button type="button"
+                    @onclick="() => ProbeHomeWizardAsync(meter)"
+                    disabled="@(_isProbing || string.IsNullOrWhiteSpace(meter.IpAddress))"
+                    title="Queries http://{ip}/api on the HomeWizard device to fetch exact product type, serial/MAC and firmware"
+                    style="background: #059669; color: white; border: none; padding: 0.35rem 0.75rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+                @(_isProbing ? "⏳ Probing meter..." : "🔍 Identify HomeWizard via /api")
+            </button>
+        </div>
+
+        @InfoBox(_probeStatus, _probeSuccess)
+
+        <div class="card-grid">
+            <div>
+                <label class="form-label">1. Manufacturer (Catalog)</label>
+                <select value="@vendorSelectValue"
+                        @onchange="@(e => OnVendorSelected(meter, e.Value?.ToString()))"
+                        class="form-select">
+                    @foreach (var vendor in vendors)
+                    {
+                        <option value="@vendor">@vendor</option>
+                    }
+                    <option value="__custom__">-- Custom / Other Manufacturer --</option>
+                </select>
+            </div>
+
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">2. Model (Catalog)</label>
+                <select value="@modelSelectValue"
+                        @onchange="@(e => OnCatalogProductSelected(meter, e.Value?.ToString()))"
+                        style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white;">
+                    @foreach (var prod in vendorModels)
+                    {
+                        <option value="@prod.ProductId">
+                            @prod.Model (@(prod.DefaultPortCount > 0 ? "LAN" : "Wi-Fi"))
+                        </option>
+                    }
+                    <option value="__custom__">-- Custom / Other Model (free text) --</option>
+                </select>
+            </div>
+
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Manufacturer (Free Text)</label>
+                <input value="@meter.Vendor"
+                       @oninput="@(e => OnCustomVendorInput(meter, e.Value?.ToString() ?? ""))"
+                       placeholder="HomeWizard / Shelly / Easee"
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Model (Free Text)</label>
+                <input value="@meter.MeterModel"
+                       @oninput="@(e => OnCustomModelInput(meter, e.Value?.ToString() ?? ""))"
+                       placeholder="Wi-Fi P1 Meter (HWE-P1) / Pro 3EM"
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Meter Interface / Connection</label>
+                <input value="@meter.MeterInterface"
+                       @oninput="@(e => UpdateMeter(meter with { MeterInterface = e.Value?.ToString() ?? "" }))"
+                       placeholder="RJ12 P1 / HAN (DSMR), 3-Phase CT, MID DIN..."
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Physical RJ45 LAN Ports (0 = Wi-Fi/RJ12, 1 = LAN)</label>
+                <input type="number" min="0" max="4"
+                       value="@meter.PortCount"
+                       @onchange="@(e => UpdateMeter(meter with { PortCount = int.TryParse(e.Value?.ToString(), out var p) ? p : 0 }))"
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+        </div>
+
+        @if (selectedProduct is not null)
+        {
+            <div style="margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px dashed #6ee7b7; font-size: 0.8rem; color: #064e3b;">
+                <strong>@selectedProduct.GetType().Name:</strong> @selectedProduct.Description
+            </div>
+        }
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.TypedDeviceComponentBase<NetAdmin.Core.Models.EnergyMeterHardwareDevice>
+
+@code {
+    private bool _isProbing;
+    private bool _probeSuccess;
+    private string? _probeStatus;
+    private bool _customVendorMode;
+    private bool _customModelMode;
+
+    private Task OnVendorSelected(EnergyMeterHardwareDevice current, string? vendor)
+    {
+        if (string.IsNullOrWhiteSpace(vendor) || vendor == "__custom__")
+        {
+            _customVendorMode = true;
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customVendorMode = false;
+        _customModelMode = false;
+
+        var firstModel = Catalog.GetByCategoryAndVendor(HardwareCategory.EnergyMeter, vendor).FirstOrDefault();
+        if (firstModel is not null)
+        {
+            return OnCatalogProductSelected(current, firstModel.ProductId);
+        }
+
+        return UpdateMeter(current with { Vendor = vendor });
+    }
+
+    private Task OnCatalogProductSelected(EnergyMeterHardwareDevice current, string? productId)
+    {
+        if (string.IsNullOrWhiteSpace(productId) || productId == "__custom__")
+        {
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customModelMode = false;
+        var product = Catalog.GetById(productId);
+        if (product is null)
+            return Task.CompletedTask;
+
+        var applied = product.ApplyToDevice(current);
+        if (applied is EnergyMeterHardwareDevice em)
+        {
+        return NotifyDeviceChanged(em);
+        }
+
+        return NotifyDeviceChanged(current with
+        {
+            Vendor = applied.Vendor,
+            MeterModel = applied.Model,
+            Model = applied.Model,
+            PortCount = applied.PortCount,
+            TagsCsv = product.DefaultTagsCsv
+        });
+    }
+
+    private Task OnCustomVendorInput(EnergyMeterHardwareDevice current, string vendor)
+    {
+        _customVendorMode = !Catalog.GetVendorsByCategory(HardwareCategory.EnergyMeter)
+            .Any(v => v.Equals(vendor, StringComparison.OrdinalIgnoreCase));
+        return UpdateMeter(current with { Vendor = vendor });
+    }
+
+    private Task OnCustomModelInput(EnergyMeterHardwareDevice current, string model)
+    {
+        _customModelMode = true;
+        return UpdateMeter(current with { MeterModel = model, Model = model });
+    }
+
+    private async Task ProbeHomeWizardAsync(EnergyMeterHardwareDevice current)
+    {
+        if (string.IsNullOrWhiteSpace(current.IpAddress))
+            return;
+
+        _isProbing = true;
+        _probeStatus = null;
+
+        try
+        {
+            var info = await HomeWizardProvider.ProbeDeviceAsync(current.IpAddress);
+            if (info is null)
+            {
+                _probeSuccess = false;
+                _probeStatus = $"Could not reach HomeWizard Local API at http://{current.IpAddress}/api (make sure 'Local API' is enabled in the HomeWizard Energy app).";
+                return;
+            }
+
+            var updated = current with
+            {
+                Vendor = "HomeWizard",
+                MeterModel = info.MatchedProduct?.Model ?? $"{info.ProductName} ({info.ProductTypeCode})",
+                Model = info.MatchedProduct?.Model ?? $"{info.ProductName} ({info.ProductTypeCode})",
+                MacAddress = string.IsNullOrWhiteSpace(current.MacAddress) && !string.IsNullOrWhiteSpace(info.SerialHex)
+                    ? info.SerialHex
+                    : current.MacAddress,
+                TagsCsv = info.MatchedProduct?.DefaultTagsCsv ?? current.TagsCsv
+            };
+
+            if (info.MatchedProduct is not null && info.MatchedProduct.ApplyToDevice(updated) is EnergyMeterHardwareDevice matchedMeter)
+            {
+                updated = matchedMeter;
+            }
+
+            _probeSuccess = true;
+            _probeStatus = $"✅ Identified: {info.ProductName} (Code: {info.ProductTypeCode}, FW: {info.FirmwareVersion ?? "-"}, API: {info.ApiVersion ?? "-"})";
+            await NotifyDeviceChanged(updated);
+        }
+        finally
+        {
+            _isProbing = false;
+        }
+    }
+
+    // Use NotifyDeviceChanged from base class to update Device and invoke DeviceChanged
+    private Task UpdateMeter(EnergyMeterHardwareDevice updated) => NotifyDeviceChanged(updated);
+}

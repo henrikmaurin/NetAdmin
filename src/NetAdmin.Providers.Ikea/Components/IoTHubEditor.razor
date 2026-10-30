@@ -1,0 +1,187 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using NetAdmin.Core.Models
+@using NetAdmin.Providers.Ikea.Products
+@inject ProductCatalogRegistry Catalog
+
+@if (Device is IoTHubHardwareDevice hub)
+{
+    var vendors = Catalog.GetVendorsByCategory(HardwareCategory.IoTHub);
+    var matchedVendor = vendors.FirstOrDefault(v => v.Equals(hub.Vendor, StringComparison.OrdinalIgnoreCase));
+    var vendorSelectValue = _customVendorMode || matchedVendor is null ? "__custom__" : matchedVendor;
+    var vendorModels = matchedVendor is not null ? Catalog.GetByCategoryAndVendor(HardwareCategory.IoTHub, matchedVendor) : [];
+    var selectedProduct = !_customModelMode ? vendorModels.FirstOrDefault(p => p.MatchesCodeOrModel(hub.HubModel)) : null;
+    var modelSelectValue = selectedProduct?.ProductId ?? "__custom__";
+
+    <div class="card card--iothub">
+        <h4 class="card-header">📡 IoT Hub Properties & Supported Protocols</h4>
+
+        <div class="card-grid" style="margin-bottom:1rem;">
+            <div>
+                <label class="form-label">1. Manufacturer (Catalog)</label>
+                <select value="@vendorSelectValue"
+                        @onchange="@(e => OnVendorSelected(hub, e.Value?.ToString()))"
+                        class="form-select">
+                    @foreach (var vendor in vendors)
+                    {
+                        <option value="@vendor">@vendor</option>
+                    }
+                    <option value="__custom__">-- Custom / Other Manufacturer --</option>
+                </select>
+            </div>
+
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">2. Model (Catalog)</label>
+                <select value="@modelSelectValue"
+                        @onchange="@(e => OnCatalogProductSelected(hub, e.Value?.ToString()))"
+                        style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white;">
+                    @foreach (var prod in vendorModels)
+                    {
+                        <option value="@prod.ProductId">@prod.Model</option>
+                    }
+                    <option value="__custom__">-- Custom / Other Model (free text) --</option>
+                </select>
+            </div>
+
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Manufacturer (Free Text)</label>
+                <input value="@hub.Vendor"
+                       @oninput="@(e => OnCustomVendorInput(hub, e.Value?.ToString() ?? ""))"
+                       placeholder="IKEA / Xiaomi / Philips Hue"
+                       class="form-input" />
+            </div>
+
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Model (Free Text)</label>
+                <input value="@hub.HubModel"
+                       @oninput="@(e => OnCustomModelInput(hub, e.Value?.ToString() ?? ""))"
+                       placeholder="TRÅDFRI / DIRIGERA / Smart Home Hub 2"
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Physical LAN Ports (1 = RJ45, 0 = Wi-Fi)</label>
+                <input type="number" min="0" max="4"
+                       value="@hub.PortCount"
+                       @onchange="@(e => UpdateHub(hub with { PortCount = int.TryParse(e.Value?.ToString(), out var p) ? p : 1 }))"
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+        </div>
+
+        <div style="border-top: 1px dashed #d8b4fe; padding-top: 0.75rem;">
+            <label style="display: block; font-size: 0.78rem; font-weight: 600; margin-bottom: 0.4rem; color: #581c87;">
+                Supported Protocols & Radio Technologies (click to toggle or edit below):
+            </label>
+            <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem;">
+                @foreach (var proto in KnownProtocols)
+                {
+                    bool active = HasProtocol(hub, proto);
+                    <button type="button"
+                            @onclick="() => ToggleProtocol(hub, proto)"
+                            style="padding: 0.25rem 0.65rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; cursor: pointer; border: 1px solid @(active ? "#7c3aed" : "#cbd5e1"); background: @(active ? "#7c3aed" : "white"); color: @(active ? "white" : "#334155");">
+                        @(active ? "✓ " : "+ ")@proto
+                    </button>
+                }
+            </div>
+            <input value="@hub.SupportedProtocolsCsv"
+                   @oninput="@(e => UpdateHub(hub with { SupportedProtocolsCsv = e.Value?.ToString() ?? "" }))"
+                   placeholder="Zigbee, Matter, Thread, Ethernet (LAN), Bluetooth LE, Bluetooth Mesh..."
+                   style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem;" />
+        </div>
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.TypedDeviceComponentBase<NetAdmin.Core.Models.IoTHubHardwareDevice>
+
+@code {
+    private static readonly string[] KnownProtocols =
+    [
+        "Zigbee",
+        "Matter",
+        "Thread",
+        "Ethernet (LAN)",
+        "Wi-Fi",
+        "Bluetooth LE",
+        "Bluetooth Mesh",
+        "Z-Wave",
+        "433 MHz",
+        "CoAP",
+        "MQTT",
+        "KNXnet/IP"
+    ];
+
+    private static bool HasProtocol(IoTHubHardwareDevice hub, string protocol) =>
+        hub.SupportedProtocolsCsv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(p => p.Equals(protocol, StringComparison.OrdinalIgnoreCase));
+
+    private Task ToggleProtocol(IoTHubHardwareDevice hub, string protocol)
+    {
+        var list = hub.SupportedProtocolsCsv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        var existing = list.FirstOrDefault(p => p.Equals(protocol, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+            list.Remove(existing);
+        else
+            list.Add(protocol);
+
+        return UpdateHub(hub with { SupportedProtocolsCsv = string.Join(", ", list) });
+    }
+
+    private bool _customVendorMode;
+    private bool _customModelMode;
+
+    private Task OnVendorSelected(IoTHubHardwareDevice current, string? vendor)
+    {
+        if (string.IsNullOrWhiteSpace(vendor) || vendor == "__custom__")
+        {
+            _customVendorMode = true;
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customVendorMode = false;
+        _customModelMode = false;
+
+        var firstModel = Catalog.GetByCategoryAndVendor(HardwareCategory.IoTHub, vendor).FirstOrDefault();
+        if (firstModel is not null)
+        {
+            return OnCatalogProductSelected(current, firstModel.ProductId);
+        }
+
+        return UpdateHub(current with { Vendor = vendor });
+    }
+
+    private Task OnCatalogProductSelected(IoTHubHardwareDevice current, string? productId)
+    {
+        if (string.IsNullOrWhiteSpace(productId) || productId == "__custom__")
+        {
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customModelMode = false;
+        var product = Catalog.GetById(productId);
+        if (product is null)
+            return Task.CompletedTask;
+
+        return UpdateHub((IoTHubHardwareDevice)product.ApplyToDevice(current));
+    }
+
+    private Task OnCustomVendorInput(IoTHubHardwareDevice current, string vendor)
+    {
+        _customVendorMode = !Catalog.GetVendorsByCategory(HardwareCategory.IoTHub)
+            .Any(v => v.Equals(vendor, StringComparison.OrdinalIgnoreCase));
+        return UpdateHub(current with { Vendor = vendor });
+    }
+
+    private Task OnCustomModelInput(IoTHubHardwareDevice current, string model)
+    {
+        _customModelMode = true;
+        return UpdateHub(current with { HubModel = model, Model = model });
+    }
+
+    private Task UpdateHub(IoTHubHardwareDevice updated) => NotifyDeviceChanged(updated);
+}

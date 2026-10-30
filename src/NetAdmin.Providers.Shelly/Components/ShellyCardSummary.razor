@@ -1,0 +1,11 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+
+@if (Device is ShellyHardwareDevice sh)
+{
+    <div class="card-summary card-summary--shelly">
+        ⚡ Shelly @sh.ShellyModel (Gen @sh.Generation)
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase

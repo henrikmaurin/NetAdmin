@@ -1,0 +1,399 @@
+﻿@page "/infrastructure"
+@page "/hardware"
+@rendermode InteractiveServer
+@using NetAdmin.Core.Models
+@using NetAdmin.Core.Providers
+@using NetAdmin.Infrastructure.Services
+@inject IHardwareInventoryProvider HardwareProvider
+@inject IPhysicalLinkProvider PhysicalLinkProvider
+@inject NavigationManager Navigation
+@inject HardwareTypeRegistry TypeRegistry
+
+<PageTitle>NetAdmin - Hardware Inventory</PageTitle>
+
+<div style="font-family: system-ui, sans-serif; max-width: 1280px; margin: 0 auto; padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <div>
+            <a href="/" style="text-decoration: none; color: #0066cc; font-size: 0.9rem;">← Back to Dashboard</a>
+            <h1 style="margin: 0.25rem 0 0 0;">Hardware Inventory</h1>
+            <small style="color: #64748b;">Manage all devices through their dedicated hardware modules. Click any device to open its details page. Physical connections are listed below.</small>
+        </div>
+        <button @onclick="ToggleCreateModal"
+                style="padding: 0.65rem 1.25rem; background: #16a34a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            @(_showCreateModal ? "✕ Close Form" : "+ Register New Device")
+        </button>
+    </div>
+
+    @if (_showCreateModal && _newDevice is not null && _selectedCreateModule is not null)
+    {
+        <div style="background: #f8fafc; border: 2px solid #cbd5e1; border-radius: 8px; padding: 1.25rem; margin-bottom: 2rem;">
+            <h3 style="margin-top: 0; color: #0f172a;">Register New Network Device</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin-bottom: 1rem;">
+                <div>
+                    <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Category / Module</label>
+                    <select value="@_selectedCreateModule.ModuleId"
+                            @onchange="OnCreateModuleChanged"
+                            style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                        @foreach (var mod in TypeRegistry.AllModules)
+                        {
+                            <option value="@mod.ModuleId">@mod.DisplayName</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Name</label>
+                    <input value="@_newDevice.Name"
+                           @oninput="@(e => _newDevice = _newDevice with { Name = e.Value?.ToString() ?? "" })"
+                           placeholder="e.g. Front Door Camera / Office Switch"
+                           style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Room / Location</label>
+                    <input value="@_newDevice.Room"
+                           @oninput="@(e => _newDevice = _newDevice with { Room = e.Value?.ToString() ?? "" })"
+                           placeholder="e.g. Server Closet / Office"
+                           style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">IP Address (optional)</label>
+                    <input value="@_newDevice.IpAddress"
+                           @oninput="@(e => _newDevice = _newDevice with { IpAddress = e.Value?.ToString() })"
+                           placeholder="192.168.1.x"
+                           style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">MAC Address (optional)</label>
+                    <input value="@_newDevice.MacAddress"
+                           @oninput="@(e => _newDevice = _newDevice with { MacAddress = e.Value?.ToString() })"
+                           placeholder="AA:BB:CC:DD:EE:FF"
+                           style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Tags (comma-separated)</label>
+                    <input value="@_newDevice.TagsCsv"
+                           @oninput="@(e => _newDevice = _newDevice with { TagsCsv = e.Value?.ToString() ?? "" })"
+                           placeholder="shelly, iot, office"
+                           style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+                </div>
+            </div>
+
+            @if (_selectedCreateModule.EditorComponentType is not null)
+            {
+                <DynamicComponent Type="_selectedCreateModule.EditorComponentType"
+                                  Parameters="@GetCreateEditorParameters()" />
+            }
+
+            <button @onclick="CreateHardwareAsync" style="padding: 0.55rem 1.25rem; background: #0284c7; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                💾 Save and Open Device
+            </button>
+        </div>
+    }
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem; margin-bottom: 2rem;">
+        <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+            <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+                <button @onclick="() => _selectedCategory = null"
+                        style="padding: 0.4rem 0.85rem; border-radius: 20px; border: 1px solid #cbd5e1; cursor: pointer; background: @(_selectedCategory is null ? "#0f172a" : "#f8fafc"); color: @(_selectedCategory is null ? "white" : "#334155"); font-weight: 500;">
+                    All (@_hardware.Count)
+                </button>
+                @foreach (var cat in Enum.GetValues<HardwareCategory>())
+                {
+                    var count = _hardware.Count(h => h.Category == cat);
+                    <button @onclick="() => _selectedCategory = cat"
+                            style="padding: 0.4rem 0.85rem; border-radius: 20px; border: 1px solid #cbd5e1; cursor: pointer; background: @(_selectedCategory == cat ? "#0284c7" : "#f8fafc"); color: @(_selectedCategory == cat ? "white" : "#334155"); font-weight: 500;">
+                        @TypeRegistry.GetCategoryIcon(cat) @cat.ToDisplayName() (@count)
+                    </button>
+                }
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; min-width: 280px;">
+                <input @bind="_searchQuery" @bind:event="oninput" placeholder="Search name, IP, room or #tag..."
+                       style="flex: 1; padding: 0.45rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem;">
+            @foreach (var dev in FilteredHardware)
+            {
+                var mod = TypeRegistry.Resolve(dev);
+                <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <span style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #475569; background: #e2e8f0; padding: 0.15rem 0.5rem; border-radius: 4px;">
+                                @mod.Icon @dev.Category.ToDisplayName()
+                            </span>
+                            <span style="font-size: 0.8rem; color: #64748b;">@dev.PortCount @(dev.PortCount == 1 ? "port" : "ports")</span>
+                        </div>
+
+                        <h3 style="margin: 0.6rem 0 0.2rem 0; font-size: 1.1rem;">
+                            <a href="/device/@dev.Id" style="color: #0f172a; text-decoration: none;">@dev.Name →</a>
+                        </h3>
+
+                        <div style="font-size: 0.85rem; color: #475569; margin-bottom: 0.5rem;">
+                            📍 Room: <strong>@(string.IsNullOrWhiteSpace(dev.Room) ? "Unassigned" : dev.Room)</strong>
+                            @if (!string.IsNullOrWhiteSpace(dev.IpAddress))
+                            {
+                                <span> • IP: <code style="background: #e2e8f0; padding: 0.1rem 0.3rem; border-radius: 3px;">@dev.IpAddress</code></span>
+                            }
+                        </div>
+
+                        @if (mod.CardSummaryComponentType is not null)
+                        {
+                            <DynamicComponent Type="mod.CardSummaryComponentType"
+                                              Parameters="@(new Dictionary<string, object?> { ["Device"] = dev })" />
+                        }
+
+                        <div style="margin-bottom: 0.75rem;">
+                            @foreach (var tag in dev.GetTags())
+                            {
+                                <span @onclick="() => _searchQuery = tag"
+                                      style="cursor: pointer; background: #dbeafe; color: #1e40af; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.75rem; margin-right: 0.25rem; display: inline-block; margin-bottom: 0.2rem;">
+                                    #@tag
+                                </span>
+                            }
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 0.5rem; border-top: 1px solid #e2e8f0; padding-top: 0.75rem; margin-top: 0.5rem;">
+                        <a href="/device/@dev.Id"
+                           style="flex: 1; text-align: center; padding: 0.4rem; background: #0f172a; color: white; text-decoration: none; border-radius: 4px; font-size: 0.8rem; font-weight: 500;">
+                            🔍 Open Device Page
+                        </a>
+                        @if (!string.IsNullOrWhiteSpace(dev.EffectiveManagementUrl))
+                        {
+                            <a href="@dev.EffectiveManagementUrl" target="_blank"
+                               style="padding: 0.4rem 0.65rem; background: #0284c7; color: white; text-decoration: none; border-radius: 4px; font-size: 0.8rem; font-weight: 500;">
+                                🌐 GUI
+                            </a>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem;">
+        <h2 style="margin-top: 0; color: #0f172a; border-bottom: 2px solid #f1f5f9; padding-bottom: 0.5rem;">
+            🔗 Physical Cable Connections (L1 Port-to-Port)
+        </h2>
+
+        <div style="display: grid; grid-template-columns: 2fr 1fr 2fr 1fr 1.5fr auto; gap: 0.75rem; background: #f8fafc; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; align-items: end;">
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">From Device</label>
+                <select @bind="_linkSourceId" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                    @foreach (var h in _hardware)
+                    {
+                        <option value="@h.Id">@TypeRegistry.GetCategoryIcon(h.Category) @h.Name (@h.PortCount p)</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">From Port #</label>
+                <input type="number" min="1" max="48" @bind="_linkSourcePort" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">To Device</label>
+                <select @bind="_linkTargetId" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                    @foreach (var h in _hardware)
+                    {
+                        <option value="@h.Id">@TypeRegistry.GetCategoryIcon(h.Category) @h.Name (@h.PortCount p)</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">To Port #</label>
+                <input type="number" min="1" max="48" @bind="_linkTargetPort" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Cable / Label</label>
+                <input @bind="_linkLabel" placeholder="Cat6 to Living Room" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+            <div>
+                <button @onclick="AddLinkAsync" style="background: #0284c7; color: white; border: none; border-radius: 4px; padding: 0.5rem 1rem; cursor: pointer; font-weight: 600;">
+                    + Connect
+                </button>
+            </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+            <thead>
+                <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                    <th style="padding: 0.6rem;">From Device</th>
+                    <th style="padding: 0.6rem;">Port</th>
+                    <th style="padding: 0.6rem; text-align: center;">⟷</th>
+                    <th style="padding: 0.6rem;">To Device</th>
+                    <th style="padding: 0.6rem;">Port</th>
+                    <th style="padding: 0.6rem;">Description</th>
+                    <th style="padding: 0.6rem;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var link in _links)
+                {
+                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                        <td style="padding: 0.6rem; font-weight: 600;">
+                            <a href="/device/@link.SourceDeviceId" style="color: #0284c7; text-decoration: none;">@link.SourceDeviceName</a>
+                        </td>
+                        <td style="padding: 0.6rem;"><span style="background: #dbeafe; color: #1e40af; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: bold;">Port @link.SourcePort</span></td>
+                        <td style="padding: 0.6rem; text-align: center;">━━━▶</td>
+                        <td style="padding: 0.6rem; font-weight: 600;">
+                            <a href="/device/@link.TargetDeviceId" style="color: #0284c7; text-decoration: none;">@link.TargetDeviceName</a>
+                        </td>
+                        <td style="padding: 0.6rem;"><span style="background: #dcfce7; color: #166534; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: bold;">Port @link.TargetPort</span></td>
+                        <td style="padding: 0.6rem; color: #475569;">@link.CableLabel</td>
+                        <td style="padding: 0.6rem; text-align: right;">
+                            <button @onclick="() => DeleteLinkAsync(link.Id)" style="background: #dc2626; color: white; border: none; padding: 0.25rem 0.6rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Remove</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<HardwareDevice> _hardware = [];
+    private IReadOnlyList<PhysicalLink> _links = [];
+
+    private HardwareCategory? _selectedCategory;
+    private string _searchQuery = "";
+    private bool _showCreateModal;
+
+    private IHardwareUiModule? _selectedCreateModule;
+    private HardwareDevice? _newDevice;
+
+    // Skapa länk
+    private string _linkSourceId = "tplink-sg108pe-1";
+    private int _linkSourcePort = 1;
+    private string _linkTargetId = "patchpanel-1";
+    private int _linkTargetPort = 1;
+    private string _linkLabel = "";
+
+    private IEnumerable<HardwareDevice> FilteredHardware => _hardware.Where(h =>
+        (_selectedCategory is null || h.Category == _selectedCategory) &&
+        (string.IsNullOrWhiteSpace(_searchQuery) ||
+         h.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+         h.Room.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+         (h.IpAddress?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+         h.TagsCsv.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)));
+
+    protected override async Task OnInitializedAsync()
+    {
+        InitNewDevice(TypeRegistry.AllModules.First());
+        await LoadAsync();
+    }
+
+    private void ToggleCreateModal()
+    {
+        _showCreateModal = !_showCreateModal;
+        if (_showCreateModal && _newDevice is null)
+        {
+            InitNewDevice(TypeRegistry.AllModules.First());
+        }
+    }
+
+    private void InitNewDevice(IHardwareUiModule module)
+    {
+        _selectedCreateModule = module;
+        var id = $"{module.ModuleId}-{Guid.NewGuid().ToString("N")[..6]}";
+        _newDevice = module.EnsureDeviceType(module.CreateDefault(
+            id,
+            _newDevice?.Name ?? "",
+            _newDevice?.IpAddress,
+            _newDevice?.MacAddress,
+            _newDevice?.Room ?? ""));
+    }
+
+    private void OnCreateModuleChanged(ChangeEventArgs e)
+    {
+        var modId = e.Value?.ToString() ?? "";
+        var mod = TypeRegistry.GetByModuleId(modId);
+        if (mod is not null)
+        {
+            InitNewDevice(mod);
+        }
+    }
+
+    private Dictionary<string, object?> GetCreateEditorParameters()
+    {
+        if (_newDevice is not null && _selectedCreateModule is not null)
+        {
+            _newDevice = _selectedCreateModule.EnsureDeviceType(_newDevice);
+        }
+
+        var parameters = new Dictionary<string, object?>
+        {
+            ["Device"] = _newDevice
+        };
+
+        if (_selectedCreateModule?.EditorComponentType is null)
+            return parameters;
+
+        Type? deviceType = _selectedCreateModule.EditorComponentType.GetProperty("Device")?.PropertyType;
+        if (deviceType is null)
+        {
+            var t = _selectedCreateModule.EditorComponentType;
+            while (t is not null)
+            {
+                if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(NetAdmin.Core.Components.TypedDeviceComponentBase<>))
+                {
+                    deviceType = t.GetGenericArguments()[0];
+                    break;
+                }
+                t = t.BaseType;
+            }
+        }
+
+        deviceType ??= typeof(HardwareDevice);
+
+        var helper = GetType().GetMethod(nameof(CreateDeviceChangedCallback), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var genericHelper = helper.MakeGenericMethod(deviceType);
+        parameters["DeviceChanged"] = genericHelper.Invoke(this, Array.Empty<object>());
+
+        return parameters;
+    }
+
+    private EventCallback<TDevice> CreateDeviceChangedCallback<TDevice>() where TDevice : HardwareDevice
+    {
+        return EventCallback.Factory.Create<TDevice>(this, updated => _newDevice = updated);
+    }
+
+    private async Task LoadAsync()
+    {
+        _hardware = await HardwareProvider.GetAllHardwareAsync();
+        _links = await PhysicalLinkProvider.GetLinksAsync();
+    }
+
+    private async Task CreateHardwareAsync()
+    {
+        if (_newDevice is null || _selectedCreateModule is null || string.IsNullOrWhiteSpace(_newDevice.Name))
+            return;
+
+        var deviceToSave = _selectedCreateModule.EnsureDeviceType(_newDevice);
+        await HardwareProvider.SaveHardwareAsync(deviceToSave);
+        Navigation.NavigateTo($"/device/{deviceToSave.Id}");
+    }
+
+    private async Task AddLinkAsync()
+    {
+        var src = _hardware.FirstOrDefault(h => h.Id == _linkSourceId);
+        var dst = _hardware.FirstOrDefault(h => h.Id == _linkTargetId);
+        if (src is null || dst is null) return;
+
+        var link = new PhysicalLink(
+            Guid.NewGuid().ToString("N")[..8],
+            src.Id, src.Name, _linkSourcePort,
+            dst.Id, dst.Name, _linkTargetPort,
+            _linkLabel, "");
+
+        await PhysicalLinkProvider.SaveLinkAsync(link);
+        _linkLabel = "";
+        await LoadAsync();
+    }
+
+    private async Task DeleteLinkAsync(string id)
+    {
+        await PhysicalLinkProvider.DeleteLinkAsync(id);
+        await LoadAsync();
+    }
+}

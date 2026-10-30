@@ -1,0 +1,134 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using NetAdmin.Core.Models
+@using NetAdmin.Core.Providers
+@inherits NetAdmin.Core.Components.CatalogDeviceEditorBase<HardwareDevice>
+@inject IHomeAssistantProvider HomeAssistantProvider
+
+@{
+    var vendors = GetCatalogVendors();
+    var vendorSelectValue = GetVendorSelectValue(Device.Vendor);
+    var vendorModels = GetVendorModels(Device.Vendor);
+    var selectedProduct = GetSelectedProduct(Device.Vendor, Device.Model);
+    var modelSelectValue = GetModelSelectValue(Device.Vendor, Device.Model);
+}
+
+<div class="card card--blue">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+        <h4 class="card-header" style="margin: 0;">🏡 Home Automation & Home Assistant</h4>
+        <button type="button"
+                @onclick="ProbeHomeAssistantAsync"
+                disabled="@_isProbing"
+                style="background: #0284c7; color: white; border: none; padding: 0.35rem 0.75rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+            @(_isProbing ? "⏳ Querying Home Assistant..." : "🔍 Query Home Assistant API (/api/config)")
+        </button>
+    </div>
+
+    @InfoBox(_statusMessage, _statusSuccess)
+
+    @if (_statusSummary is not null)
+    {
+        <div style="margin-bottom: 0.85rem; padding: 0.65rem; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.82rem; display: flex; flex-wrap: wrap; gap: 0.85rem;">
+            <span><strong>Location:</strong> @_statusSummary.LocationName</span>
+            <span><strong>Version:</strong> @_statusSummary.Version</span>
+            <span><strong>State:</strong> @_statusSummary.State</span>
+            <span><strong>Components:</strong> @_statusSummary.ComponentCount</span>
+            <span><strong>Entities:</strong> @_statusSummary.EntityCount</span>
+        </div>
+    }
+
+    <div class="card-grid">
+        <div>
+            <label class="form-label">1. Manufacturer (Catalog)</label>
+            <select value="@vendorSelectValue"
+                    @onchange="@(e => OnVendorSelectedAsync(e.Value?.ToString()))"
+                    class="form-select">
+                @foreach (var vendor in vendors)
+                {
+                    <option value="@vendor">@vendor</option>
+                }
+                <option value="__custom__">-- Custom / Other Manufacturer --</option>
+            </select>
+        </div>
+
+        <div>
+            <label class="form-label">2. Model (Catalog)</label>
+            <select value="@modelSelectValue"
+                    @onchange="@(e => OnCatalogProductSelectedAsync(e.Value?.ToString()))"
+                    class="form-select">
+                @foreach (var prod in vendorModels)
+                {
+                    <option value="@prod.ProductId">@prod.Model</option>
+                }
+                <option value="__custom__">-- Custom / Other Model --</option>
+            </select>
+        </div>
+
+        <div>
+            <label class="form-label">Manufacturer (Free Text)</label>
+            <input value="@Device.Vendor"
+                   @oninput="@(e => OnCustomVendorInputAsync(e.Value?.ToString() ?? ""))"
+                   placeholder="Home Assistant / Homey / Hubitat"
+                   class="form-input" />
+        </div>
+
+        <div>
+            <label class="form-label">Model (Free Text)</label>
+            <input value="@Device.Model"
+                   @oninput="@(e => OnCustomModelInputAsync(e.Value?.ToString() ?? ""))"
+                   placeholder="Home Assistant Green / Yellow / HAOS VM"
+                   class="form-input" />
+        </div>
+
+        <div>
+            <label class="form-label">Physical Network Ports</label>
+            <input type="number" min="0" max="8"
+                   value="@Device.PortCount"
+                   @onchange="@(e => NotifyDeviceChanged(Device with { PortCount = int.TryParse(e.Value?.ToString(), out var p) ? p : 1 }))"
+                   class="form-input" />
+        </div>
+    </div>
+
+    @if (selectedProduct is not null)
+    {
+        <div style="margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px dashed #cbd5e1; font-size: 0.8rem; color: #334155;">
+            <strong>@selectedProduct.FullName:</strong> @selectedProduct.Description
+        </div>
+    }
+</div>
+
+@code {
+    protected override HardwareCategory TargetCategory => HardwareCategory.HomeAutomation;
+
+    private bool _isProbing;
+    private bool _statusSuccess;
+    private string? _statusMessage;
+    private HomeAssistantStatusSummary? _statusSummary;
+
+    private async Task ProbeHomeAssistantAsync()
+    {
+        _isProbing = true;
+        _statusMessage = null;
+
+        try
+        {
+            var targetUrl = !string.IsNullOrWhiteSpace(Device.ManagementUrl) ? Device.ManagementUrl : Device.IpAddress;
+            _statusSummary = await HomeAssistantProvider.GetStatusAsync(Device.Id, targetUrl);
+
+            if (_statusSummary is not null)
+            {
+                _statusSuccess = true;
+                _statusMessage = $"Home Assistant v{_statusSummary.Version} ({_statusSummary.LocationName}) is {_statusSummary.State} — {_statusSummary.EntityCount} entities across {_statusSummary.ComponentCount} components.";
+            }
+            else
+            {
+                _statusSuccess = false;
+                _statusMessage = "Could not reach Home Assistant API (/api/config). Verify Base URL and Long-Lived Access Token in the credentials section below.";
+            }
+        }
+        finally
+        {
+            _isProbing = false;
+        }
+    }
+}

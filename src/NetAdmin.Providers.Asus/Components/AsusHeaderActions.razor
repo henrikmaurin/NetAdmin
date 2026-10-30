@@ -1,0 +1,76 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+@inject AsusService AsusService
+
+@if (Device is not null)
+{
+    if (Compact)
+    {
+        @AnchorAction($"/switch/{Device.Id}", "Open Port & VLAN Overview", "🔌", "primary")
+        if (!string.IsNullOrWhiteSpace(Device.EffectiveManagementUrl))
+        {
+            @AnchorAction(Device.EffectiveManagementUrl, "Open Web GUI", "🌐", "blue")
+        }
+        else
+        {
+            @AnchorAction($"/device/{Device.Id}", "Open device page", "🔍", "primary")
+        }
+    }
+    else
+    {
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+            @AnchorAction($"/switch/{Device.Id}", "Open Port & VLAN Overview", "🔌 Open Port & VLAN Overview", "primary")
+            @if (!string.IsNullOrWhiteSpace(Device.EffectiveManagementUrl))
+            {
+                @AnchorAction(Device.EffectiveManagementUrl, "Open Web GUI", "🌐 Open Web GUI", "blue")
+            }
+
+            @ButtonAction(ProbeAsync, "🔎 Probe", "primary")
+            @ButtonAction(ProbeSshAsync, "🔒 SSH Test", "primary")
+        </div>
+    }
+
+    @InfoBox(_probeMessage)
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase
+
+@code {
+    [Inject] private NetAdmin.Core.Services.IEncryptedSettingsService? SettingsService { get; set; }
+
+    private string? _probeMessage;
+
+    private async Task ProbeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Device.IpAddress)) return;
+        var res = await AsusService.ProbeAsync(Device.IpAddress);
+        _probeMessage = $"Probe: web={(res.HasWeb ? "yes" : "no")}, ssh={(res.HasSsh ? "yes" : "no")}";
+        StateHasChanged();
+        await Task.Delay(3000);
+        _probeMessage = null;
+        StateHasChanged();
+    }
+
+    private async Task ProbeSshAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Device.IpAddress) || SettingsService is null) return;
+        var user = await SettingsService.GetSettingAsync($"device:{Device.Id}:ssh:username");
+        var pass = await SettingsService.GetSettingAsync($"device:{Device.Id}:ssh:password");
+        if (string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(pass))
+        {
+            _probeMessage = "SSH credentials not configured for this device.";
+            StateHasChanged();
+            await Task.Delay(2500);
+            _probeMessage = null;
+            StateHasChanged();
+            return;
+        }
+
+        var outp = await AsusService.ExecuteSshCommandAsync(Device.IpAddress, 22, user, pass, "uname -a");
+        _probeMessage = outp is null ? "SSH command failed or timed out." : $"SSH: {outp.Substring(0, Math.Min(200, outp.Length))}";
+        StateHasChanged();
+        await Task.Delay(4000);
+        _probeMessage = null;
+        StateHasChanged();
+    }
+}

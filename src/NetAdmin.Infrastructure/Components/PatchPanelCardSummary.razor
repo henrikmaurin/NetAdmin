@@ -1,0 +1,11 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+
+@if (Device is PatchPanelHardwareDevice panel)
+{
+    <div class="card-summary card-summary--patchpanel">
+        🔌 @panel.PortCount ports @(panel.Ports is { Count: > 0 } ? $"({panel.Ports.Count(p => !string.IsNullOrWhiteSpace(p.Room) && p.Room != "Unassigned" && p.Room != "Ej angivet")} room-assigned)" : "")
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase

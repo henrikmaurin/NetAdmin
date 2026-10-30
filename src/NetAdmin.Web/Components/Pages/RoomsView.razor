@@ -1,0 +1,220 @@
+﻿@page "/rooms"
+@rendermode InteractiveServer
+@using NetAdmin.Core.Models
+@using NetAdmin.Core.Providers
+@inject IRoomProvider RoomProvider
+@inject IHardwareInventoryProvider HardwareProvider
+
+<PageTitle>NetAdmin - Rooms & Zones</PageTitle>
+
+<div style="font-family: system-ui, sans-serif; max-width: 1280px; margin: 0 auto; padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <div>
+            <a href="/" style="text-decoration: none; color: #0066cc; font-size: 0.9rem;">← Back to Dashboard</a>
+            <h1 style="margin: 0.25rem 0 0 0;">Rooms & Property Zones</h1>
+            <small style="color: #64748b;">Manage rooms and see an overview of all equipment in each location.</small>
+        </div>
+    </div>
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem; margin-bottom: 2rem;">
+        <h3 style="margin-top: 0; color: #0f172a;">Add New Room</h3>
+        <div style="display: grid; grid-template-columns: 2fr 1.5fr 1.5fr 2fr auto; gap: 0.75rem; align-items: end;">
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Room Name</label>
+                <input @bind="_newName" placeholder="e.g. Guest Room / Patio" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Zone / Building</label>
+                <input @bind="_newZone" placeholder="Main House / Garage" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Floor</label>
+                <input @bind="_newFloor" placeholder="Ground Floor / Basement" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Tags</label>
+                <input @bind="_newTags" placeholder="room, wifi" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+            <div>
+                <button @onclick="SaveRoomAsync" style="background: #16a34a; color: white; border: none; border-radius: 4px; padding: 0.5rem 1rem; cursor: pointer; font-weight: 600;">
+                    + Add Room
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1.25rem;">
+        @foreach (var room in _rooms)
+        {
+            var hardwareInRoom = _hardware.Where(h => string.Equals(h.Room, room.Name, StringComparison.OrdinalIgnoreCase)).ToList();
+            var isEditing = _editingRoomId == room.Id;
+
+            <div style="background: white; border: 1px solid @(isEditing ? "#0284c7" : "#cbd5e1"); border-radius: 8px; padding: 1.25rem; display: flex; flex-direction: column; justify-content: space-between;">
+                @if (isEditing)
+                {
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <h3 style="margin: 0; font-size: 1rem; color: #0f172a;">✏️ Edit Room</h3>
+                        </div>
+
+                        <div>
+                            <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.2rem;">Room Name</label>
+                            <input @bind="_editName" placeholder="Room name" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;" />
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem;">
+                            <div>
+                                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.2rem;">Zone / Building</label>
+                                <input @bind="_editZone" placeholder="Main House / Garage" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;" />
+                            </div>
+                            <div>
+                                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.2rem;">Floor</label>
+                                <input @bind="_editFloor" placeholder="Ground Floor / Basement" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.2rem;">Tags (comma-separated)</label>
+                            <input @bind="_editTags" placeholder="room, wifi" style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;" />
+                        </div>
+
+                        <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
+                            <button @onclick="SaveEditedRoomAsync" style="background: #0284c7; color: white; border: none; border-radius: 4px; padding: 0.45rem 0.9rem; cursor: pointer; font-weight: 600; font-size: 0.85rem;">
+                                💾 Save
+                            </button>
+                            <button @onclick="CancelEditing" style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 4px; padding: 0.45rem 0.9rem; cursor: pointer; font-weight: 600; font-size: 0.85rem;">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <span style="font-size: 0.75rem; background: #e2e8f0; color: #334155; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 600;">
+                                @room.BuildingOrZone • @room.Floor
+                            </span>
+                            <div style="display: flex; gap: 0.65rem; align-items: center;">
+                                <button @onclick="() => StartEditing(room)" style="background: none; border: none; color: #0284c7; cursor: pointer; font-size: 0.8rem; font-weight: 600;">Edit</button>
+                                <button @onclick="() => DeleteRoomAsync(room.Id)" style="background: none; border: none; color: #dc2626; cursor: pointer; font-size: 0.8rem;">Remove</button>
+                            </div>
+                        </div>
+
+                        <h2 style="margin: 0.3rem 0 0.75rem 0; color: #0f172a;">🏠 @room.Name</h2>
+
+                        <div style="margin-bottom: 1rem;">
+                            @foreach (var tag in room.GetTags())
+                            {
+                                <span style="background: #dbeafe; color: #1e40af; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.75rem; margin-right: 0.25rem;">#@tag</span>
+                            }
+                        </div>
+
+                        <h4 style="margin: 0 0 0.4rem 0; font-size: 0.85rem; color: #64748b; text-transform: uppercase;">Equipment in this room (@hardwareInRoom.Count):</h4>
+                        @if (hardwareInRoom.Count == 0)
+                        {
+                            <p style="font-size: 0.85rem; color: #94a3b8; font-style: italic; margin: 0 0 1rem 0;">No hardware registered here yet.</p>
+                        }
+                        else
+                        {
+                            <ul style="margin: 0 0 1rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
+                                @foreach (var hw in hardwareInRoom)
+                                {
+                                    <li style="margin-bottom: 0.25rem;">
+                                        <a href="/device/@hw.Id" style="color: #0284c7; text-decoration: none; font-weight: 500;">@hw.Name</a>
+                                        <span style="color: #64748b; font-size: 0.8rem;">(@hw.Category.ToDisplayName())</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<RoomItem> _rooms = [];
+    private IReadOnlyList<HardwareDevice> _hardware = [];
+
+    private string _newName = "";
+    private string _newZone = "Main House";
+    private string _newFloor = "Ground Floor";
+    private string _newTags = "";
+
+    private string? _editingRoomId;
+    private string _editName = "";
+    private string _editZone = "";
+    private string _editFloor = "";
+    private string _editTags = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _rooms = await RoomProvider.GetRoomsAsync();
+        _hardware = await HardwareProvider.GetAllHardwareAsync();
+    }
+
+    private void StartEditing(RoomItem room)
+    {
+        _editingRoomId = room.Id;
+        _editName = room.Name;
+        _editZone = room.BuildingOrZone;
+        _editFloor = room.Floor;
+        _editTags = room.TagsCsv;
+    }
+
+    private void CancelEditing()
+    {
+        _editingRoomId = null;
+    }
+
+    private async Task SaveEditedRoomAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_editingRoomId) || string.IsNullOrWhiteSpace(_editName))
+            return;
+
+        var updatedRoom = new RoomItem(
+            Id: _editingRoomId,
+            Name: _editName.Trim(),
+            BuildingOrZone: string.IsNullOrWhiteSpace(_editZone) ? "Main House" : _editZone.Trim(),
+            Floor: string.IsNullOrWhiteSpace(_editFloor) ? "Ground Floor" : _editFloor.Trim(),
+            TagsCsv: _editTags.Trim()
+        );
+
+        await RoomProvider.SaveRoomAsync(updatedRoom);
+        _editingRoomId = null;
+        await LoadAsync();
+    }
+
+    private async Task SaveRoomAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newName)) return;
+        var room = new RoomItem(
+            Id: $"room-{Guid.NewGuid().ToString("N")[..6]}",
+            Name: _newName,
+            BuildingOrZone: string.IsNullOrWhiteSpace(_newZone) ? "Main House" : _newZone,
+            Floor: string.IsNullOrWhiteSpace(_newFloor) ? "Ground Floor" : _newFloor,
+            TagsCsv: _newTags
+        );
+
+        await RoomProvider.SaveRoomAsync(room);
+        _newName = _newTags = "";
+        await LoadAsync();
+    }
+
+    private async Task DeleteRoomAsync(string id)
+    {
+        if (_editingRoomId == id)
+        {
+            _editingRoomId = null;
+        }
+        await RoomProvider.DeleteRoomAsync(id);
+        await LoadAsync();
+    }
+}

@@ -1,0 +1,122 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using NetAdmin.Core.Models
+@using NetAdmin.Providers.OpnSense.Products
+@inject ProductCatalogRegistry Catalog
+
+@{
+    var vendors = Catalog.GetVendorsByCategory(HardwareCategory.Router);
+    var matchedVendor = vendors.FirstOrDefault(v => v.Equals(Device.Vendor, StringComparison.OrdinalIgnoreCase));
+    var vendorSelectValue = _customVendorMode || matchedVendor is null ? "__custom__" : matchedVendor;
+    var vendorModels = matchedVendor is not null ? Catalog.GetByCategoryAndVendor(HardwareCategory.Router, matchedVendor) : [];
+    var selectedProduct = !_customModelMode ? vendorModels.FirstOrDefault(p => p.MatchesCodeOrModel(Device.Model)) : null;
+    var modelSelectValue = selectedProduct?.ProductId ?? "__custom__";
+}
+
+    <div class="card card--accent">
+        <h4 class="card-header">🔥 Router Properties</h4>
+        <div class="card-grid">
+        <div>
+                <label class="form-label">1. Manufacturer (Catalog)</label>
+                <select value="@vendorSelectValue"
+                        @onchange="@(e => OnVendorSelected(e.Value?.ToString()))"
+                        class="form-select">
+                @foreach (var vendor in vendors)
+                {
+                    <option value="@vendor">@vendor</option>
+                }
+                <option value="__custom__">-- Custom / Other Manufacturer --</option>
+            </select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">2. Model (Catalog)</label>
+            <select value="@modelSelectValue"
+                    @onchange="@(e => OnCatalogProductSelected(e.Value?.ToString()))"
+                    style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white;">
+                @foreach (var prod in vendorModels)
+                {
+                    <option value="@prod.ProductId">@prod.Model (@prod.DefaultPortCount ports)</option>
+                }
+                <option value="__custom__">-- Custom / Other Model (free text) --</option>
+            </select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Manufacturer (Free Text)</label>
+            <input value="@Device.Vendor"
+                   @oninput="@(e => OnCustomVendorInput(e.Value?.ToString() ?? ""))"
+                   placeholder="Asus / OPNsense / Zyxel..."
+                   style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+        </div>
+        <div>
+            <label class="form-label">Model (Free Text)</label>
+            <input value="@Device.Model"
+                   @oninput="@(e => OnCustomModelInput(e.Value?.ToString() ?? ""))"
+                   placeholder="RT-AX86U Pro / Custom Router..."
+                   class="form-input" />
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Physical Network Ports (NIC)</label>
+            <input type="number" min="1" max="16"
+                   value="@Device.PortCount"
+                    @onchange="@(e => NotifyDeviceChanged(Device with { PortCount = int.TryParse(e.Value?.ToString(), out var p) ? p : 4 }))"
+                   style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+        </div>
+    </div>
+</div>
+
+@inherits NetAdmin.Core.Components.TypedDeviceComponentBase<NetAdmin.Core.Models.HardwareDevice>
+
+@code {
+    private bool _customVendorMode;
+    private bool _customModelMode;
+
+    private Task OnVendorSelected(string? vendor)
+    {
+        if (string.IsNullOrWhiteSpace(vendor) || vendor == "__custom__")
+        {
+            _customVendorMode = true;
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customVendorMode = false;
+        _customModelMode = false;
+
+        var firstModel = Catalog.GetByCategoryAndVendor(HardwareCategory.Router, vendor).FirstOrDefault();
+        if (firstModel is not null)
+        {
+            return OnCatalogProductSelected(firstModel.ProductId);
+        }
+
+        return NotifyDeviceChanged(Device with { Vendor = vendor });
+    }
+
+    private Task OnCatalogProductSelected(string? productId)
+    {
+        if (string.IsNullOrWhiteSpace(productId) || productId == "__custom__")
+        {
+            _customModelMode = true;
+            return Task.CompletedTask;
+        }
+
+        _customModelMode = false;
+        var product = Catalog.GetById(productId);
+        if (product is null)
+            return Task.CompletedTask;
+
+        return NotifyDeviceChanged(product.ApplyToDevice(Device));
+    }
+
+    private Task OnCustomVendorInput(string vendor)
+    {
+        _customVendorMode = !Catalog.GetVendorsByCategory(HardwareCategory.Router)
+            .Any(v => v.Equals(vendor, StringComparison.OrdinalIgnoreCase));
+        return NotifyDeviceChanged(Device with { Vendor = vendor });
+    }
+
+    private Task OnCustomModelInput(string model)
+    {
+        _customModelMode = true;
+        return NotifyDeviceChanged(Device with { Model = model });
+    }
+}

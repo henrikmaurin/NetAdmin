@@ -1,0 +1,356 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using NetAdmin.Core.Models
+@using NetAdmin.Core.Providers
+@using NetAdmin.Infrastructure.Services
+@inject NetworkTopologyService TopologyService
+@inject IEnumerable<IWirelessProvider> WirelessProviders
+@inject IEnumerable<IDhcpProvider> DhcpProviders
+@inject IEnumerable<IFirewallProvider> FirewallProviders
+@inject IHardwareInventoryProvider HardwareProvider
+@inject IShellyProvider ShellyProvider
+@inject ProductCatalogRegistry ProductCatalog
+@inject NavigationManager Navigation
+@inject HardwareTypeRegistry TypeRegistry
+
+<PageTitle>NetAdmin - Network Overview</PageTitle>
+
+<div style="font-family: system-ui, sans-serif; max-width: 1400px; margin: 0 auto; padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <div>
+            <h1 style="margin: 0;">NetAdmin Dashboard</h1>
+            <small style="color: #666;">OPNsense + UniFi Network + Hardware Inventory</small>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <a href="/hardware"
+               style="padding: 0.6rem 1.2rem; background: #0284c7; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
+                🖧 Hardware & Cabling
+            </a>
+            <a href="/catalog"
+               style="padding: 0.6rem 1.2rem; background: #0369a1; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
+                📦 Product Catalog
+            </a>
+            <a href="/switch"
+               style="padding: 0.6rem 1.2rem; background: #1e293b; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
+                🎛️ Switch VLAN Guide
+            </a>
+            <a href="/setup"
+               style="padding: 0.6rem 1.2rem; background: #0f172a; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
+                ⚙️ Settings
+            </a>
+            <a href="/rooms"
+               style="padding: 0.6rem 1.2rem; background: #0f172a; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
+                🏠 Rooms & Zones
+            </a>
+            <button @onclick="LoadDataAsync" disabled="@_isLoading"
+                    style="padding: 0.6rem 1.2rem; background: #16a34a; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">
+                @(_isLoading ? "Loading..." : "↻ Refresh Now")
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_actionStatus))
+    {
+        <div style="padding: 0.75rem 1rem; background: #f0fdf4; border: 1px solid #86efac; color: #166534; border-radius: 6px; margin-bottom: 1.25rem;">
+            @_actionStatus
+        </div>
+    }
+
+    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px solid #cbd5e1;">
+        <input @bind="_searchQuery" @bind:event="oninput"
+               placeholder="Search custom name, hostname, IP, MAC, room or #tag..."
+               style="flex: 1; padding: 0.55rem 0.85rem; border: 1px solid #cbd5e1; border-radius: 6px;" />
+
+        <select @bind="_connectionFilter" style="padding: 0.55rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+            <option value="all">All Connections (@_clients.Count)</option>
+            <option value="wireless">📶 Wi-Fi Only (@_clients.Count(c => c.IsWireless))</option>
+            <option value="wired">🔌 Wired Only (@_clients.Count(c => !c.IsWireless))</option>
+        </select>
+    </div>
+
+    <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+            <thead>
+                <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                    <th style="padding: 0.75rem;">Custom Name & Network Hostname</th>
+                    <th style="padding: 0.75rem;">Room & Tags</th>
+                    <th style="padding: 0.75rem;">IP Address</th>
+                    <th style="padding: 0.75rem;">MAC Address</th>
+                    <th style="padding: 0.75rem;">Connection / AP</th>
+                    <th style="padding: 0.75rem; text-align: center; width: 6rem;">Admin</th>
+                    <th style="padding: 0.75rem;">Actions (OPNsense / Device)</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var client in FilteredClients)
+                {
+                    var hw = GetRegisteredHardware(client.MacAddress);
+                    var customName = hw?.Name;
+                    var networkHostname = client.Hostname;
+                    var hasDifferentCustomName = !string.IsNullOrWhiteSpace(customName) &&
+                                                 !string.Equals(customName, networkHostname, StringComparison.OrdinalIgnoreCase);
+
+                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                        <td style="padding: 0.65rem 0.75rem;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <button @onclick="() => OpenOrRegisterClientAsync(client)"
+                                        style="background: none; border: none; color: #0284c7; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; font-size: 0.95rem; text-align: left;">
+                                    @(customName ?? networkHostname ?? "Unknown Device") →
+                                </button>
+                            </div>
+
+                            <div style="font-size: 0.78rem; color: #64748b; margin-top: 0.2rem;">
+                                Hostname (DHCP/DNS):
+                                <code style="background: #f1f5f9; padding: 0.1rem 0.35rem; border-radius: 3px; color: #334155;">
+                                    @(string.IsNullOrWhiteSpace(networkHostname) ? "none" : networkHostname)
+                                </code>
+                            </div>
+                        </td>
+
+                        <td style="padding: 0.65rem 0.75rem;">
+                            @if (hw is not null)
+                            {
+                                @if (!string.IsNullOrWhiteSpace(hw.Room))
+                                {
+                                    <div style="font-size: 0.8rem; color: #334155; margin-bottom: 0.2rem;">📍 @hw.Room</div>
+                                }
+                                @foreach (var tag in hw.GetTags())
+                                {
+                                    <span style="background: #dbeafe; color: #1e40af; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.72rem; margin-right: 0.2rem;">#@tag</span>
+                                }
+                            }
+                            else
+                            {
+                                <span style="color: #94a3b8; font-size: 0.8rem;">Not registered yet</span>
+                            }
+                        </td>
+
+                        <td style="padding: 0.65rem 0.75rem; font-family: monospace;">@(client.IpAddress ?? "-")</td>
+                        <td style="padding: 0.65rem 0.75rem; font-family: monospace; font-size: 0.82rem; color: #475569;">@client.MacAddress</td>
+
+                        <td style="padding: 0.65rem 0.75rem;">
+                            @if (client.IsWireless)
+                            {
+                                <span>📶 @(client.Ssid ?? "Wi-Fi") <small style="color: #64748b;">(@(client.ConnectedApName ?? "AP"), @(client.SignalRssi) dBm)</small></span>
+                            }
+                            else
+                            {
+                                <span>🔌 Wired (@(client.InterfaceOrVlan ?? "LAN"))</span>
+                            }
+                        </td>
+
+                        <td style="padding: 0.65rem 0.75rem; text-align: center; vertical-align: middle;">
+                            @if (hw is not null)
+                            {
+                                if (!string.IsNullOrWhiteSpace(hw.EffectiveManagementUrl))
+                                {
+                                    <a href="@hw.EffectiveManagementUrl" target="_blank" title="Open device GUI"
+                                       style="display: inline-block; padding: 0.28rem 0.42rem; background: #0284c7; color: white; text-decoration: none; border-radius: 5px; font-size: 0.82rem; font-weight: 600;">
+                                        🌐
+                                    </a>
+                                }
+                                else
+                                {
+                                    <a href="/device/@hw.Id" title="Open device page"
+                                       style="display: inline-block; padding: 0.28rem 0.42rem; background: #0f172a; color: white; text-decoration: none; border-radius: 5px; font-size: 0.82rem; font-weight: 600;">
+                                        🔍
+                                    </a>
+                                }
+
+                                var caps = TypeRegistry.Resolve(hw).GetCapabilities(hw);
+                                if (caps is not null)
+                                {
+                                    <div style="margin-top:0.35rem; display:flex; gap:0.25rem; justify-content:center;">
+                                        @foreach (var cap in caps.Distinct())
+                                        {
+                                            var title = cap.ToString();
+                                            <span title="@title" style="background:#f1f5f9;padding:0.12rem 0.32rem;border-radius:4px;font-size:0.72rem;">
+                                                @cap.ToIcon()
+                                            </span>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </td>
+
+                        <td style="padding: 0.65rem 0.75rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;">
+                            @if (!string.IsNullOrEmpty(client.IpAddress))
+                            {
+                                @if (hasDifferentCustomName || !client.IsStaticDhcp)
+                                {
+                                    <button @onclick="() => SyncNameAndStaticToOpnSenseAsync(client, customName)"
+                                            style="padding: 0.3rem 0.55rem; background: #0284c7; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: 500;"
+                                            title="Creates/updates static DHCP lease and syncs custom name to OPNsense">
+                                        🔄 @(hasDifferentCustomName ? "Sync Name to OPNsense" : "📌 Make Static")
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span style="font-size: 0.78rem; color: #16a34a; font-weight: 600;">✓ Static & Synced</span>
+                                }
+
+                                <button @onclick="() => BlockClientAsync(client.IpAddress!)"
+                                        style="padding: 0.3rem 0.5rem; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">
+                                    🚫 Block
+                                </button>
+                            }
+
+                            @if (hw is not null && TypeRegistry.Resolve(hw).HeaderActionsComponentType is Type actionComp)
+                            {
+                                <div style="margin-left: 0.25rem; display: inline-block;">
+                                    <DynamicComponent Type="actionComp"
+                                                      Parameters="@(new Dictionary<string, object?> { ["Device"] = hw, ["Compact"] = true })" />
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<CorrelatedClient> _clients = [];
+    private Dictionary<string, HardwareDevice> _hardwareByMac = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool _isLoading;
+    private string _searchQuery = "";
+    private string _connectionFilter = "all";
+    private string? _actionStatus;
+
+    private IEnumerable<CorrelatedClient> FilteredClients => _clients.Where(c =>
+    {
+        if (_connectionFilter == "wireless" && !c.IsWireless) return false;
+        if (_connectionFilter == "wired" && c.IsWireless) return false;
+
+        if (string.IsNullOrWhiteSpace(_searchQuery)) return true;
+
+        var hw = GetRegisteredHardware(c.MacAddress);
+        return (c.Hostname?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               (c.IpAddress?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               c.MacAddress.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+               (hw?.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               (hw?.Room.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               (hw?.TagsCsv.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false);
+    });
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            _clients = await TopologyService.GetCorrelatedClientsAsync();
+            var allHw = await HardwareProvider.GetAllHardwareAsync();
+            _hardwareByMac = allHw
+                .Where(h => !string.IsNullOrWhiteSpace(h.MacAddress))
+                .GroupBy(h => MacAddress.Normalize(h.MacAddress!))
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private HardwareDevice? GetRegisteredHardware(string macAddress)
+    {
+        if (string.IsNullOrWhiteSpace(macAddress)) return null;
+        _hardwareByMac.TryGetValue(MacAddress.Normalize(macAddress), out var hw);
+        return hw;
+    }
+
+    private async Task OpenOrRegisterClientAsync(CorrelatedClient client)
+    {
+        var existing = await HardwareProvider.GetHardwareByMacAsync(client.MacAddress);
+        if (existing is not null)
+        {
+            Navigation.NavigateTo($"/device/{existing.Id}");
+            return;
+        }
+
+        var id = $"dev-{client.MacAddress.Replace(":", "").ToLowerInvariant()}";
+        var name = client.Hostname ?? $"Device {client.IpAddress}";
+
+        var module = TypeRegistry.AllModules.FirstOrDefault(m => m.Matches(HardwareCategory.IoT, hostname: client.Hostname))
+                     ?? TypeRegistry.ResolveByCriteria(HardwareCategory.Generic, hostname: client.Hostname);
+
+        var newDev = module.CreateDefault(id, name, client.IpAddress, client.MacAddress, "Unassigned");
+
+        // Om det är en Shelly-enhet och den har en IP-adress, hämta exakt produkttyp direkt från enheten!
+        if (newDev is ShellyHardwareDevice shellyDev && !string.IsNullOrWhiteSpace(client.IpAddress))
+        {
+            var probed = await ShellyProvider.ProbeDeviceAsync(client.IpAddress);
+            if (probed is not null)
+            {
+                newDev = shellyDev with
+                {
+                    Name = !string.IsNullOrWhiteSpace(probed.DeviceName) ? probed.DeviceName : name,
+                    ShellyModel = probed.FriendlyModel,
+                    Model = probed.FriendlyModel,
+                    Generation = probed.Generation,
+                    PortCount = probed.EffectivePortCount,
+                    TagsCsv = probed.EffectiveTagsCsv
+                };
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(client.Hostname))
+        {
+            // Matcha mot övriga produktklasser (t.ex. HomeWizard P1-meter, IKEA Trådfri, etc.) via hostname
+            var matchedProd = ProductCatalog.AllProducts.FirstOrDefault(p =>
+                p.DeviceCodes.Any(code => client.Hostname.Contains(code, StringComparison.OrdinalIgnoreCase)));
+            if (matchedProd is not null)
+            {
+                newDev = matchedProd.ApplyToDevice(newDev) with { TagsCsv = matchedProd.DefaultTagsCsv };
+            }
+        }
+
+        await HardwareProvider.SaveHardwareAsync(newDev);
+        Navigation.NavigateTo($"/device/{id}");
+    }
+
+    private async Task SyncNameAndStaticToOpnSenseAsync(CorrelatedClient client, string? customName)
+    {
+        if (string.IsNullOrWhiteSpace(client.IpAddress) || string.IsNullOrWhiteSpace(client.MacAddress))
+            return;
+
+        var preferredName = !string.IsNullOrWhiteSpace(customName)
+            ? customName
+            : (client.Hostname ?? $"host-{client.MacAddress.Replace(":", "")[..6]}");
+
+        foreach (var dhcp in DhcpProviders)
+        {
+            var ok = await dhcp.AddStaticLeaseAsync(
+                client.IpAddress,
+                client.MacAddress,
+                preferredName,
+                description: $"{preferredName} (NetAdmin)");
+
+            if (ok)
+            {
+                _actionStatus = $"✅ Synced name '{preferredName}' ({client.IpAddress}) as static DHCP lease to OPNsense!";
+                await LoadDataAsync();
+                break;
+            }
+        }
+    }
+
+    private async Task BlockClientAsync(string ipAddress)
+    {
+        foreach (var firewall in FirewallProviders)
+        {
+            if (await firewall.BlockHostAsync(ipAddress))
+            {
+                _actionStatus = $"🚫 Blocked {ipAddress} in OPNsense!";
+                await LoadDataAsync();
+                break;
+            }
+        }
+    }
+}

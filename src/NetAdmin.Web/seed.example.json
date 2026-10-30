@@ -1,0 +1,26 @@
+{
+  "hardwareDevices": [
+    {
+      "id": "example-router",
+      "name": "Example Router",
+      "category": "Router",
+      "ipAddress": "192.168.1.1",
+      "room": "Server Room",
+      "portCount": 4,
+      "managementUrl": "https://192.168.1.1",
+      "tagsCsv": "router, firewall"
+    }
+  ],
+  "switchPorts": [],
+  "patchPanelPortItems": [],
+  "physicalLinks": [],
+  "rooms": [
+    {
+      "id": "room-server",
+      "name": "Server Room",
+      "buildingOrZone": "Main Building",
+      "floor": "Ground Floor",
+      "tagsCsv": "rack, core"
+    }
+  ]
+}

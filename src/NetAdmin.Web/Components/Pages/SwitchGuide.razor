@@ -1,0 +1,680 @@
+﻿@page "/switch"
+@page "/switch/{DeviceId}"
+@rendermode InteractiveServer
+@using NetAdmin.Core.Models
+@using NetAdmin.Core.Providers
+@inject ISwitchProvider SwitchProvider
+@inject IEnumerable<IRoutingProvider> RoutingProviders
+@inject IEnumerable<IWirelessProvider> WirelessProviders
+@inject NavigationManager Navigation
+
+<PageTitle>NetAdmin - @(_switch?.Name ?? "Port & VLAN Guide")</PageTitle>
+
+<div style="font-family: system-ui, sans-serif; max-width: 1280px; margin: 0 auto; padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <div style="display: flex; gap: 1rem; margin-bottom: 0.25rem;">
+                <a href="/" style="text-decoration: none; color: #0066cc; font-size: 0.9rem;">← Back to Dashboard</a>
+                <a href="/hardware" style="text-decoration: none; color: #64748b; font-size: 0.9rem;">🖧 Hardware & Cabling</a>
+                @if (_switch is not null)
+                {
+                    <a href="/device/@_switch.Id" style="text-decoration: none; color: #0284c7; font-size: 0.9rem; font-weight: 600;">⚙️ Open Device Details (@_switch.Name)</a>
+                }
+            </div>
+            <h1 style="margin: 0.25rem 0 0 0;">Network Port & 802.1Q VLAN Guide</h1>
+            <small style="color: #666;">Select any switch, router, or multi-port device to configure ports, inspect connected cables, and calculate 802.1Q VLANs & PVIDs.</small>
+        </div>
+
+        <div style="min-width: 320px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.75rem 1rem;">
+            <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #334155; margin-bottom: 0.35rem; text-transform: uppercase;">
+                Active Switch / Router / Network Device (@_configurableDevices.Count)
+            </label>
+            <select value="@(_switch?.Id ?? DeviceId)"
+                    @onchange="OnDeviceSelectionChangedAsync"
+                    style="width: 100%; padding: 0.5rem; border: 1px solid #94a3b8; border-radius: 6px; font-weight: 600; background: white;">
+                @foreach (var dev in _configurableDevices)
+                {
+                    <option value="@dev.Id">
+                        [@dev.Category.ToDisplayName()] @dev.Name (@dev.PortCount ports@(!string.IsNullOrWhiteSpace(dev.Room) ? $" • {dev.Room}" : ""))
+                    </option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @if (_switch is not null)
+    {
+        <div style="background: #1e293b; color: white; padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.6rem;">
+                        <strong style="font-size: 1.15rem;">@_switch.Name</strong>
+                        <span style="background: #334155; color: #38bdf8; padding: 0.15rem 0.55rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">
+                            @_switch.Category.ToDisplayName()
+                        </span>
+                        @if (!string.IsNullOrWhiteSpace(_switch.Vendor) || !string.IsNullOrWhiteSpace(_switch.Model))
+                        {
+                            <span style="font-size: 0.85rem; color: #cbd5e1;">
+                                @($"{_switch.Vendor} {_switch.Model}".Trim())
+                            </span>
+                        }
+                    </div>
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem;">
+                        @_switch.Ports.Count physical ports
+                        @(!string.IsNullOrWhiteSpace(_switch.Room) ? $" • 📍 {_switch.Room}" : "")
+                        @(!string.IsNullOrWhiteSpace(_switch.IpAddress) ? $" • IP: {_switch.IpAddress}" : "")
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 0.6rem; align-items: center;">
+                    @if (_switch.Model.Contains("SG108PE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <span style="font-size: 0.8rem; color: #facc15; background: #0f172a; padding: 0.3rem 0.6rem; border-radius: 4px;">
+                            ⚡ Ports 1–4 support PoE+ (802.3af/at)
+                        </span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_switch.ManagementUrl))
+                    {
+                        <a href="@_switch.ManagementUrl" target="_blank"
+                           style="padding: 0.4rem 0.85rem; background: #0284c7; color: white; text-decoration: none; border-radius: 6px; font-size: 0.8rem; font-weight: 600;">
+                            🌐 Open Web GUI
+                        </a>
+                    }
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 0.75rem;">
+                @foreach (var port in _switch.Ports)
+                {
+                    var isSelected = _selectedPort?.PortNumber == port.PortNumber;
+                    <div @onclick="() => SelectPort(port)"
+                         style="background: @(isSelected ? "#0284c7" : "#334155"); border: 2px solid @(isSelected ? "#38bdf8" : "#475569"); border-radius: 8px; padding: 0.75rem; cursor: pointer; transition: 0.15s;">
+                        <div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 0.4rem;">
+                            <span>Port @port.PortNumber</span>
+                            <div style="display: flex; gap: 0.25rem;">
+                                @if (!string.IsNullOrWhiteSpace(port.ConnectedDeviceId))
+                                {
+                                    <span title="Physical cable connected: @port.ConnectedDeviceName" style="color: #4ade80;">🔗</span>
+                                }
+                                @if (port.PoeEnabled)
+                                {
+                                    <span title="PoE Active" style="color: #facc15;">⚡</span>
+                                }
+                            </div>
+                        </div>
+                        <div style="font-size: 0.85rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 0.35rem;" title="@port.Label">
+                            @port.Label
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(port.ConnectedDeviceName))
+                        {
+                            <div style="font-size: 0.72rem; color: #86efac; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 0.35rem;" title="Cable to @port.ConnectedDeviceName (Port @port.ConnectedRemotePort)">
+                                🔌 @port.ConnectedDeviceName (P@(port.ConnectedRemotePort))
+                            </div>
+                        }
+                        <div style="font-size: 0.75rem; background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 4px; color: #cbd5e1;">
+                            @FormatRole(port.Role)
+                        </div>
+                        <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.35rem;">
+                            Untagged (PVID): <strong style="color: #e2e8f0;">@port.NativeVlanId</strong>
+                        </div>
+                        @{
+                            var effectiveTagged = GetEffectiveTaggedVlans(port);
+                        }
+                        @if (effectiveTagged.Count > 0)
+                        {
+                            <div style="font-size: 0.72rem; color: #93c5fd; margin-top: 0.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                                 title="Tagged VLANs: @string.Join(", ", effectiveTagged)">
+                                Tagged: <strong>@string.Join(", ", effectiveTagged)</strong>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    @if (_selectedPort is not null && _switch is not null)
+    {
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+                <h3 style="margin: 0;">Configure Port @_selectedPort.PortNumber on @_switch.Name</h3>
+                @if (!string.IsNullOrWhiteSpace(_selectedPort.ConnectedDeviceId))
+                {
+                    <div style="font-size: 0.85rem; background: #dcfce7; color: #166534; padding: 0.3rem 0.75rem; border-radius: 6px;">
+                        🔗 Connected via cable <strong>@(_selectedPort.CableLabel ?? "Patch")</strong> to
+                        <a href="/device/@_selectedPort.ConnectedDeviceId" style="color: #15803d; font-weight: 700;">@_selectedPort.ConnectedDeviceName (Port @_selectedPort.ConnectedRemotePort) →</a>
+                    </div>
+                }
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; align-items: end; margin-bottom: 1rem;">
+                <div>
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Description / Connected Device</label>
+                    <input @bind="_editLabel" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Port Role</label>
+                    <select @bind="_editRole" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;">
+                        <option value="@SwitchPortRole.Unused">Unused (Default VLAN 1)</option>
+                        <option value="@SwitchPortRole.RouterTrunk">Router / Switch Trunk (All VLANs Tagged)</option>
+                        <option value="@SwitchPortRole.AccessPointTrunk">Access Point Trunk (Mgmt + Wi-Fi VLANs)</option>
+                        <option value="@SwitchPortRole.CustomTrunk">Custom Trunk / Tagged VLANs (Select VLANs below)</option>
+                        <option value="@SwitchPortRole.AccessPort">Access Port (Untagged PVID + optional Tagged VLANs)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Untagged / Native VLAN (PVID)</label>
+                    <div style="display: flex; gap: 0.4rem;">
+                        <select @bind="_editNativeVlan" style="flex: 1; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;">
+                            @foreach (var v in GetAllKnownVlans())
+                            {
+                                <option value="@v.VlanId">VLAN @v.VlanId (@v.Name)</option>
+                            }
+                        </select>
+                        <input type="number" min="1" max="4094" @bind="_editNativeVlan" title="Enter any PVID (1-4094)"
+                               style="width: 80px; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;" />
+                    </div>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 0.5rem; padding-bottom: 0.4rem;">
+                    <input type="checkbox" id="poeCheck" @bind="_editPoe" />
+                    <label for="poeCheck" style="font-size: 0.9rem; font-weight: 500;">⚡ PoE Power Enabled</label>
+                </div>
+            </div>
+
+            <div style="background: white; border: 1px solid #cbd5e1; border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem;">
+                    <div>
+                        <label style="font-size: 0.85rem; font-weight: 700; color: #0f172a;">
+                            🏷️ Tagged VLAN IDs on Port @_selectedPort.PortNumber (802.1Q Tagged Membership)
+                        </label>
+                        <div style="font-size: 0.78rem; color: #64748b;">
+                            Click VLANs below to toggle Tagged membership on this port, or add a custom VLAN ID (1–4094) + Name.
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.4rem; align-items: center;">
+                        <button type="button" @onclick="SelectAllKnownTaggedVlans"
+                                style="padding: 0.3rem 0.65rem; background: #e2e8f0; color: #1e293b; border: none; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">
+                            Select All VLANs
+                        </button>
+                        <button type="button" @onclick="ClearTaggedVlans"
+                                style="padding: 0.3rem 0.65rem; background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.75rem; cursor: pointer;">
+                            Clear Tagged
+                        </button>
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.85rem;">
+                    @foreach (var vlan in GetAllKnownVlans())
+                    {
+                        var isTagged = _editTaggedVlans.Contains(vlan.VlanId);
+                        var isAutoTaggedByRole = (_editRole == SwitchPortRole.RouterTrunk && vlan.VlanId != _editNativeVlan) ||
+                                                 (_editRole == SwitchPortRole.AccessPointTrunk && _wifis.Any(w => w.IsEnabled && w.VlanId == vlan.VlanId) && vlan.VlanId != _editNativeVlan);
+
+                        <button type="button"
+                                @onclick="() => ToggleTaggedVlan(vlan.VlanId)"
+                                style="padding: 0.4rem 0.75rem; border-radius: 6px; border: 2px solid @(isTagged ? "#1d4ed8" : isAutoTaggedByRole ? "#60a5fa" : "#cbd5e1"); background: @(isTagged ? "#dbeafe" : isAutoTaggedByRole ? "#eff6ff" : "#f8fafc"); color: @(isTagged ? "#1e3a8a" : "#334155"); font-size: 0.82rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
+                            <span>@(isTagged ? "☑" : isAutoTaggedByRole ? "⊡" : "☐")</span>
+                            <span>VLAN @vlan.VlanId (@vlan.Name)</span>
+                            @if (vlan.VlanId == _editNativeVlan && !isTagged)
+                            {
+                                <span style="font-size: 0.7rem; background: #dcfce7; color: #166534; padding: 0.05rem 0.35rem; border-radius: 3px;">PVID</span>
+                            }
+                        </button>
+                    }
+                </div>
+
+                <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; padding-top: 0.65rem; border-top: 1px dashed #cbd5e1;">
+                    <span style="font-size: 0.8rem; font-weight: 600; color: #475569;">+ Add Custom Tagged VLAN:</span>
+                    <input type="number" min="1" max="4094" @bind="_newCustomVlanId" placeholder="VLAN ID (e.g. 20, 30, 40)"
+                           style="width: 150px; padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem;" />
+                    <input type="text" @bind="_newCustomVlanName" placeholder="VLAN Name (e.g. Guest, IOT, Landet)"
+                           style="width: 220px; padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem;" />
+                    <button type="button" @onclick="AddCustomTaggedVlan"
+                            style="padding: 0.4rem 0.85rem; background: #0284c7; color: white; border: none; border-radius: 4px; font-size: 0.82rem; font-weight: 600; cursor: pointer;">
+                        + Tag VLAN on Port @_selectedPort.PortNumber
+                    </button>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end;">
+                <button @onclick="SavePortAsync"
+                        style="padding: 0.6rem 1.4rem; background: #16a34a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                    💾 Save Port @_selectedPort.PortNumber & Recalculate
+                </button>
+            </div>
+        </div>
+    }
+
+    @if (_plan is not null && _switch is not null)
+    {
+        @if (_plan.ValidationWarnings.Count > 0)
+        {
+            <div style="background: #fef2f2; border: 1px solid #f87171; color: #991b1b; padding: 1rem 1.25rem; border-radius: 8px; margin-bottom: 1.5rem;">
+                <strong>⚠️ Topology Warnings:</strong>
+                <ul style="margin: 0.5rem 0 0 0; padding-left: 1.25rem;">
+                    @foreach (var warning in _plan.ValidationWarnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (_switch.SupportsTpLinkEasySmartGuide)
+        {
+            <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; padding: 0.85rem 1.25rem; border-radius: 8px; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                <div>
+                    <strong>🎛️ TP-Link Easy Smart 802.1Q VLAN Configuration Calculator</strong>
+                    <span style="font-size: 0.85rem; margin-left: 0.5rem;">
+                        Matches the exact web interface for <strong>@_switch.Vendor @_switch.Model</strong> (<em>VLAN ➔ 802.1Q VLAN</em> and <em>802.1Q PVID Setting</em>).
+                    </span>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
+                <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem;">
+                    <h3 style="margin-top: 0;">Step 1 in TP-Link: Menu "VLAN ➔ 802.1Q VLAN Configuration"</h3>
+                    <p style="font-size: 0.85rem; color: #475569; margin-top: 0;">
+                        Set <strong>802.1Q VLAN Configuration: Enable</strong>, click <em>Apply</em>, and add/modify each VLAN ID below:
+                    </p>
+
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                                <th style="padding: 0.6rem;">VLAN ID</th>
+                                <th style="padding: 0.6rem;">VLAN Name</th>
+                                <th style="padding: 0.6rem;">Member Ports</th>
+                                <th style="padding: 0.6rem;">Tagged Ports</th>
+                                <th style="padding: 0.6rem;">Untagged Ports</th>
+                                <th style="padding: 0.6rem;">Not Member</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _plan.VlanTable)
+                            {
+                                <tr style="border-bottom: 1px solid #e2e8f0;">
+                                    <td style="padding: 0.6rem; font-weight: bold;">@row.VlanId</td>
+                                    <td style="padding: 0.6rem;">@GetDisplayVlanName(row.VlanId, row.VlanName)</td>
+                                    <td style="padding: 0.6rem; font-family: monospace; font-weight: 600;">
+                                        @FormatPortRanges(row.MemberPorts)
+                                    </td>
+                                    <td style="padding: 0.6rem;">
+                                        <span style="background: #dbeafe; color: #1e40af; padding: 0.2rem 0.5rem; border-radius: 4px; font-family: monospace;">
+                                            @FormatPortRanges(row.TaggedPorts)
+                                        </span>
+                                    </td>
+                                    <td style="padding: 0.6rem;">
+                                        <span style="background: #dcfce7; color: #166534; padding: 0.2rem 0.5rem; border-radius: 4px; font-family: monospace;">
+                                            @FormatPortRanges(row.UntaggedPorts)
+                                        </span>
+                                    </td>
+                                    <td style="padding: 0.6rem; color: #94a3b8; font-family: monospace;">
+                                        @FormatPortRanges(row.NotMemberPorts)
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem;">
+                    <h3 style="margin-top: 0;">Step 2 in TP-Link: Menu "VLAN ➔ 802.1Q PVID Setting"</h3>
+                    <p style="font-size: 0.85rem; color: #475569; margin-top: 0;">
+                        Configure the native VLAN (PVID) per port so untagged incoming traffic is placed on the right VLAN:
+                    </p>
+
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                                <th style="padding: 0.6rem;">Port</th>
+                                <th style="padding: 0.6rem;">Device / Label</th>
+                                <th style="padding: 0.6rem;">PVID</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var pvid in _plan.PvidTable)
+                            {
+                                <tr style="border-bottom: 1px solid #e2e8f0;">
+                                    <td style="padding: 0.6rem; font-weight: 600;">Port @pvid.PortNumber</td>
+                                    <td style="padding: 0.6rem; color: #475569;">@pvid.PortLabel</td>
+                                    <td style="padding: 0.6rem;">
+                                        <span style="background: #1e293b; color: white; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: bold;">
+                                            @pvid.Pvid
+                                        </span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <div>
+                        <h3 style="margin: 0;">📋 Port & VLAN Assignment Summary for @_switch.Name</h3>
+                        <small style="color: #64748b;">
+                            General port & VLAN documentation table for @_switch.Category.ToDisplayName() (@($"{_switch.Vendor} {_switch.Model}".Trim())).
+                            (The step-by-step TP-Link Easy Smart 802.1Q calculator is only shown for TP-Link Easy Smart switches.)
+                        </small>
+                    </div>
+                </div>
+
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                    <thead>
+                        <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                            <th style="padding: 0.6rem;">Port</th>
+                            <th style="padding: 0.6rem;">Label / Description</th>
+                            <th style="padding: 0.6rem;">Connected Cable</th>
+                            <th style="padding: 0.6rem;">Role</th>
+                            <th style="padding: 0.6rem;">Untagged VLAN (PVID)</th>
+                            <th style="padding: 0.6rem;">Tagged VLANs</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var port in _switch.Ports)
+                        {
+                            var effectiveTagged = GetEffectiveTaggedVlans(port);
+                            <tr style="border-bottom: 1px solid #e2e8f0;">
+                                <td style="padding: 0.6rem; font-weight: 700;">Port @port.PortNumber</td>
+                                <td style="padding: 0.6rem;">@port.Label</td>
+                                <td style="padding: 0.6rem;">
+                                    @if (!string.IsNullOrWhiteSpace(port.ConnectedDeviceId))
+                                    {
+                                        <a href="/device/@port.ConnectedDeviceId" style="color: #0284c7; font-weight: 600; text-decoration: none;">
+                                            @port.ConnectedDeviceName (Port @port.ConnectedRemotePort) →
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span style="color: #94a3b8;">-</span>
+                                    }
+                                </td>
+                                <td style="padding: 0.6rem;">@FormatRole(port.Role)</td>
+                                <td style="padding: 0.6rem;">
+                                    <span style="background: #dcfce7; color: #166534; padding: 0.15rem 0.5rem; border-radius: 4px; font-family: monospace; font-weight: 600;">
+                                        VLAN @port.NativeVlanId
+                                    </span>
+                                </td>
+                                <td style="padding: 0.6rem;">
+                                    @if (effectiveTagged.Count > 0)
+                                    {
+                                        <span style="background: #dbeafe; color: #1e40af; padding: 0.15rem 0.5rem; border-radius: 4px; font-family: monospace;">
+                                            @string.Join(", ", effectiveTagged)
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span style="color: #94a3b8;">None</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string? DeviceId { get; set; }
+
+    private IReadOnlyList<HardwareDevice> _configurableDevices = [];
+    private SwitchDevice? _switch;
+    private SwitchConfigurationPlan? _plan;
+    private List<VlanDefinition> _vlans = [];
+    private List<WirelessNetwork> _wifis = [];
+    private Dictionary<int, string> _customVlanNames = new()
+    {
+        [20] = "Guest",
+        [30] = "IOT",
+        [40] = "Landet"
+    };
+
+    private SwitchPortDefinition? _selectedPort;
+    private string _editLabel = string.Empty;
+    private SwitchPortRole _editRole;
+    private int _editNativeVlan = 1;
+    private HashSet<int> _editTaggedVlans = [];
+    private bool _editPoe;
+    private int? _newCustomVlanId;
+    private string _newCustomVlanName = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        foreach (var r in RoutingProviders)
+            _vlans.AddRange(await r.GetVlansAsync());
+
+        foreach (var w in WirelessProviders)
+            _wifis.AddRange(await w.GetWirelessNetworksAsync());
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _configurableDevices = await SwitchProvider.GetConfigurableDevicesAsync();
+        await RefreshSwitchPlanAsync(DeviceId);
+
+        if (_switch?.Ports.Count > 0)
+        {
+            var existingPortNum = _selectedPort?.PortNumber ?? 1;
+            var match = _switch.Ports.FirstOrDefault(p => p.PortNumber == existingPortNum) ?? _switch.Ports[0];
+            SelectPort(match);
+        }
+    }
+
+    private IReadOnlyList<(int VlanId, string Name)> GetAllKnownVlans()
+    {
+        var dict = new Dictionary<int, string>
+        {
+            [1] = "Default"
+        };
+
+        foreach (var (vid, name) in _customVlanNames)
+            dict[vid] = name;
+
+        foreach (var v in _vlans)
+            dict[v.VlanId] = v.Name;
+
+        foreach (var w in _wifis.Where(w => w.IsEnabled && w.VlanId is > 1))
+        {
+            var vid = w.VlanId!.Value;
+            if (!dict.ContainsKey(vid))
+                dict[vid] = w.Ssid;
+        }
+
+        if (_switch is not null)
+        {
+            foreach (var p in _switch.Ports)
+            {
+                if (!dict.ContainsKey(p.NativeVlanId))
+                    dict[p.NativeVlanId] = $"VLAN {p.NativeVlanId}";
+
+                foreach (var t in p.TaggedVlanIds)
+                {
+                    if (!dict.ContainsKey(t))
+                        dict[t] = $"VLAN {t}";
+                }
+            }
+        }
+
+        foreach (var t in _editTaggedVlans)
+        {
+            if (!dict.ContainsKey(t))
+                dict[t] = $"VLAN {t}";
+        }
+
+        return dict.OrderBy(kv => kv.Key).Select(kv => (kv.Key, kv.Value)).ToList();
+    }
+
+    private string GetDisplayVlanName(int vlanId, string fallback) =>
+        _customVlanNames.TryGetValue(vlanId, out var custom) && (fallback.StartsWith("Tagged VLAN") || fallback.StartsWith("Port "))
+            ? custom
+            : fallback;
+
+    private IReadOnlyList<int> GetEffectiveTaggedVlans(SwitchPortDefinition port)
+    {
+        var set = new HashSet<int>(port.TaggedVlanIds);
+        if (port.Role == SwitchPortRole.RouterTrunk)
+        {
+            foreach (var v in GetAllKnownVlans().Where(v => v.VlanId != port.NativeVlanId))
+                set.Add(v.VlanId);
+        }
+        else if (port.Role == SwitchPortRole.AccessPointTrunk)
+        {
+            foreach (var w in _wifis.Where(w => w.IsEnabled && w.VlanId is > 1 && w.VlanId != port.NativeVlanId))
+                set.Add(w.VlanId!.Value);
+        }
+
+        return set.OrderBy(x => x).ToList();
+    }
+
+    private void ToggleTaggedVlan(int vlanId)
+    {
+        if (!_editTaggedVlans.Remove(vlanId))
+        {
+            _editTaggedVlans.Add(vlanId);
+            if (_editRole == SwitchPortRole.Unused)
+                _editRole = SwitchPortRole.CustomTrunk;
+        }
+    }
+
+    private void SelectAllKnownTaggedVlans()
+    {
+        foreach (var v in GetAllKnownVlans().Where(v => v.VlanId != _editNativeVlan))
+            _editTaggedVlans.Add(v.VlanId);
+
+        if (_editRole == SwitchPortRole.Unused)
+            _editRole = SwitchPortRole.CustomTrunk;
+    }
+
+    private void ClearTaggedVlans()
+    {
+        _editTaggedVlans.Clear();
+    }
+
+    private void AddCustomTaggedVlan()
+    {
+        if (_newCustomVlanId is >= 1 and <= 4094)
+        {
+            var vid = _newCustomVlanId.Value;
+            if (!string.IsNullOrWhiteSpace(_newCustomVlanName))
+            {
+                _customVlanNames[vid] = _newCustomVlanName.Trim();
+            }
+            else if (!_customVlanNames.ContainsKey(vid))
+            {
+                _customVlanNames[vid] = $"VLAN {vid}";
+            }
+
+            _editTaggedVlans.Add(vid);
+            if (_editRole == SwitchPortRole.Unused)
+                _editRole = SwitchPortRole.CustomTrunk;
+
+            _newCustomVlanId = null;
+            _newCustomVlanName = string.Empty;
+        }
+    }
+
+    private async Task OnDeviceSelectionChangedAsync(ChangeEventArgs e)
+    {
+        var selectedId = e.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(selectedId))
+        {
+            _selectedPort = null;
+            Navigation.NavigateTo($"/switch/{selectedId}");
+        }
+        await Task.CompletedTask;
+    }
+
+    private async Task RefreshSwitchPlanAsync(string? targetDeviceId)
+    {
+        var extraVlans = _vlans.ToList();
+        foreach (var (vid, name) in _customVlanNames)
+        {
+            if (extraVlans.All(v => v.VlanId != vid))
+                extraVlans.Add(new VlanDefinition(vid, name, "lan", null));
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetDeviceId))
+        {
+            _switch = await SwitchProvider.GetSwitchAsync(targetDeviceId);
+            _plan = await SwitchProvider.GeneratePlaybookAsync(_switch.Id, extraVlans, _wifis);
+        }
+        else
+        {
+            _switch = await SwitchProvider.GetSwitchAsync();
+            _plan = await SwitchProvider.GeneratePlaybookAsync(_switch.Id, extraVlans, _wifis);
+        }
+    }
+
+    private void SelectPort(SwitchPortDefinition port)
+    {
+        _selectedPort = port;
+        _editLabel = port.Label;
+        _editRole = port.Role;
+        _editNativeVlan = port.NativeVlanId;
+        _editTaggedVlans = port.TaggedVlanIds.ToHashSet();
+        _editPoe = port.PoeEnabled;
+    }
+
+    private async Task SavePortAsync()
+    {
+        if (_selectedPort is null || _switch is null) return;
+
+        var updated = _selectedPort with
+        {
+            DeviceId = _switch.Id,
+            Label = _editLabel,
+            Role = _editRole,
+            NativeVlanId = _editNativeVlan,
+            TaggedVlanIds = _editTaggedVlans.OrderBy(x => x).ToList(),
+            PoeEnabled = _editPoe
+        };
+
+        await SwitchProvider.UpdatePortAsync(updated);
+        await RefreshSwitchPlanAsync(_switch.Id);
+        _selectedPort = _switch?.Ports.FirstOrDefault(p => p.PortNumber == updated.PortNumber);
+    }
+
+    private static string FormatRole(SwitchPortRole role) => role switch
+    {
+        SwitchPortRole.RouterTrunk => "Router / Trunk",
+        SwitchPortRole.AccessPointTrunk => "AP Trunk",
+        SwitchPortRole.CustomTrunk => "Custom Tagged",
+        SwitchPortRole.AccessPort => "Access Port",
+        _ => "Unused"
+    };
+
+    private static string FormatPortRanges(IReadOnlyList<int> ports)
+    {
+        if (ports.Count == 0)
+            return "";
+
+        var sorted = ports.Distinct().OrderBy(x => x).ToList();
+        var ranges = new List<string>();
+        var start = sorted[0];
+        var prev = sorted[0];
+
+        for (var i = 1; i < sorted.Count; i++)
+        {
+            if (sorted[i] == prev + 1)
+            {
+                prev = sorted[i];
+            }
+            else
+            {
+                ranges.Add(start == prev ? $"{start}" : $"{start}-{prev}");
+                start = prev = sorted[i];
+            }
+        }
+
+        ranges.Add(start == prev ? $"{start}" : $"{start}-{prev}");
+        return string.Join(",", ranges);
+    }
+}

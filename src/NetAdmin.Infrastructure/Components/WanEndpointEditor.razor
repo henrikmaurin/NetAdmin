@@ -1,0 +1,32 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using NetAdmin.Core.Models
+
+@if (Device is WanHardwareDevice wan)
+{
+    <div class="card card--shelly">
+        <h4 class="card-header">🌐 WAN Endpoint Properties</h4>
+        <div class="card-grid">
+            <div>
+                <label class="form-label">ISP / Operator</label>
+                <input value="@wan.IspName"
+                       @oninput="@(e => UpdateWan(wan with { IspName = e.Value?.ToString() ?? "", Vendor = e.Value?.ToString() ?? "" }))"
+                       placeholder="Bahnhof / Telia / Telenor 5G"
+                       class="form-input" />
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;">Public IP Address (optional)</label>
+                <input value="@wan.PublicIpAddress"
+                       @oninput="@(e => UpdateWan(wan with { PublicIpAddress = e.Value?.ToString(), IpAddress = e.Value?.ToString() }))"
+                       placeholder="85.x.x.x"
+                       style="width: 100%; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;" />
+            </div>
+        </div>
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.TypedDeviceComponentBase<NetAdmin.Core.Models.WanHardwareDevice>
+
+@code {
+    private Task UpdateWan(WanHardwareDevice updated) => NotifyDeviceChanged(updated);
+}

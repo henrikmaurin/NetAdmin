@@ -1,0 +1,11 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+
+@if (Device is SwitchHardwareDevice sw)
+{
+    <div class="card-summary card-summary--switch">
+        @(sw.IsManaged ? "Managed / Smart Switch" : "Unmanaged Switch") (@sw.SwitchModel)
+    </div>
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase

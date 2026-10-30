@@ -1,0 +1,32 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+
+@if (Device.Category == HardwareCategory.AccessPoint)
+{
+    if (Compact)
+    {
+        if (Device.PortCount > 1)
+        {
+            @AnchorAction($"/switch/{Device.Id}", "Open Port & VLAN Overview", "🔌", "primary")
+        }
+
+        if (Device.Vendor.Contains("UniFi", StringComparison.OrdinalIgnoreCase) || Device.Vendor.Contains("Ubiquiti", StringComparison.OrdinalIgnoreCase) || Device.TagsCsv.Contains("unifi", StringComparison.OrdinalIgnoreCase))
+        {
+            @AnchorAction("/setup", "UniFi Controller Settings", "📶", "uni")
+        }
+    }
+    else
+    {
+        @if (Device.PortCount > 1)
+        {
+            @AnchorAction($"/switch/{Device.Id}", "Open Port & VLAN Overview", "🔌 Open Port & VLAN Overview", "primary")
+        }
+
+        @if (Device.Vendor.Contains("UniFi", StringComparison.OrdinalIgnoreCase) || Device.Vendor.Contains("Ubiquiti", StringComparison.OrdinalIgnoreCase) || Device.TagsCsv.Contains("unifi", StringComparison.OrdinalIgnoreCase))
+        {
+            @AnchorAction("/setup", "UniFi Controller Settings", "📶 UniFi Controller Settings", "uni")
+        }
+    }
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase

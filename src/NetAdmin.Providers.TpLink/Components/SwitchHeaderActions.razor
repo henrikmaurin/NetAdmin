@@ -1,0 +1,22 @@
+@using Microsoft.AspNetCore.Components
+@using NetAdmin.Core.Models
+
+@if (Device is SwitchHardwareDevice sw)
+{
+    var isTpLinkEasySmart = sw.IsManaged &&
+        (sw.Vendor.Contains("TP-Link", StringComparison.OrdinalIgnoreCase) ||
+         sw.SwitchModel.Contains("SG10", StringComparison.OrdinalIgnoreCase) ||
+         sw.TagsCsv.Contains("tplink", StringComparison.OrdinalIgnoreCase) ||
+         sw.Id.Contains("tplink", StringComparison.OrdinalIgnoreCase));
+
+    if (Compact)
+    {
+        @AnchorAction($"/switch/{Device.Id}", isTpLinkEasySmart ? "TP-Link VLAN Guide" : "Port & VLAN Overview", "🎛️", "primary")
+    }
+    else
+    {
+        @AnchorAction($"/switch/{Device.Id}", "Open", isTpLinkEasySmart ? "🎛️ Open TP-Link 802.1Q VLAN Guide" : "🔌 Open Port & VLAN Overview", "primary")
+    }
+}
+
+@inherits NetAdmin.Core.Components.DeviceComponentBase
