@@ -91,3 +91,29 @@ public sealed class GoogleNestMiniSmartSpeakerProduct : HardwareProductDefinitio
     public override string DefaultTagsCsv => "smartspeaker, google, nest, cast, assistant, wifi";
     public override string Description => "Google Nest Mini compact Wi-Fi smart speaker with Google Assistant";
 }
+
+public sealed class GooglePixelWatchProduct : HardwareProductDefinition
+{
+    public override string ProductId => "google-pixel-watch";
+    public override string Vendor => "Google";
+    public override string Model => "Pixel Watch";
+    public override HardwareCategory Category => HardwareCategory.SmartWatch;
+    public override string SubCategory => "Smart Watches";
+    public override int DefaultPortCount => 0;
+    public override IReadOnlyList<string> DeviceCodes => ["Pixel-Watch", "GD1YQ", "Pixel-Watch-2"];
+    public override string DefaultTagsCsv => "watch, google, pixel, wearable, bluetooth, wifi";
+    public override string Description => "Google Pixel Watch series smartwatch (Wear OS, Bluetooth, Wi-Fi, LTE optional)";
+}
+
+public sealed class GooglePixelWatch2Product : HardwareProductDefinition
+{
+    public override string ProductId => "google-pixel-watch-2";
+    public override string Vendor => "Google";
+    public override string Model => "Pixel Watch 2";
+    public override HardwareCategory Category => HardwareCategory.SmartWatch;
+    public override string SubCategory => "Smart Watches";
+    public override int DefaultPortCount => 0;
+    public override IReadOnlyList<string> DeviceCodes => ["Pixel-Watch-2", "Pixel-Watch-2-Gen"];
+    public override string DefaultTagsCsv => "watch, google, pixel, wearos, bluetooth, wifi";
+    public override string Description => "Google Pixel Watch 2 (Wear OS) smartwatch with Bluetooth, Wi‑Fi and optional LTE";
+}
