@@ -25,7 +25,8 @@ public enum HardwareCategory
     Soundbar = 18,
     Printer = 19,
     Nvr = 20,
-    HomeAutomation = 21
+    HomeAutomation = 21,
+    SmartWatch = 22
 }
 
 public static class HardwareCategoryExtensions
@@ -54,6 +55,7 @@ public static class HardwareCategoryExtensions
         HardwareCategory.Printer => "Printer",
         HardwareCategory.Nvr => "NVR",
         HardwareCategory.HomeAutomation => "Home Automation",
+        HardwareCategory.SmartWatch => "Smart Watch",
         _ => category.ToString()
     };
 }

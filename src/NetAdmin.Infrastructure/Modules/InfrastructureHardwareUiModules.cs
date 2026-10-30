@@ -382,6 +382,50 @@ public class TabletHardwareUiModule : IHardwareUiModule
         };
 }
 
+public class SmartWatchHardwareUiModule : IHardwareUiModule
+{
+    public string ModuleId => "smartwatch";
+    public string DisplayName => "⌚ Smart Watch";
+    public string Icon => "⌚";
+    public HardwareCategory Category => HardwareCategory.SmartWatch;
+    public int Priority => 50;
+
+    public Type? EditorComponentType => typeof(IoTDeviceEditor);
+
+    public bool CanHandle(HardwareDevice device) =>
+        device.Category == HardwareCategory.SmartWatch;
+
+    public bool Matches(HardwareCategory category, string? vendor = null, string? tagsCsv = null, string? hostname = null) =>
+        category == HardwareCategory.SmartWatch ||
+        (vendor?.Contains("XiaoMi", StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (vendor?.Contains("Apple", StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (vendor?.Contains("Samsung", StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (vendor?.Contains("Google", StringComparison.OrdinalIgnoreCase) ?? false);
+
+    public HardwareDevice CreateDefault(string id, string name = "", string? ipAddress = null, string? macAddress = null, string room = "") =>
+        new(
+            Id: id,
+            Name: string.IsNullOrWhiteSpace(name) ? "New Smart Watch" : name,
+            Category: HardwareCategory.SmartWatch,
+            IpAddress: ipAddress,
+            MacAddress: macAddress,
+            Room: room,
+            PortCount: 0,
+            ManagementUrl: null,
+            Notes: "",
+            TagsCsv: "watch, wearable",
+            Vendor: "XiaoMi",
+            Model: "Watch");
+
+    public HardwareDevice EnsureDeviceType(HardwareDevice current) =>
+        current with
+        {
+            Category = HardwareCategory.SmartWatch,
+            PortCount = 0,
+            TagsCsv = string.IsNullOrWhiteSpace(current.TagsCsv) ? "watch, wearable" : current.TagsCsv
+        };
+}
+
 public class TvHardwareUiModule : IHardwareUiModule
 {
     public string ModuleId => "tv";
@@ -702,6 +746,7 @@ public static class InfrastructureHardwareModuleExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHardwareUiModule, GenericIoTHardwareUiModule>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHardwareUiModule, PhoneHardwareUiModule>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHardwareUiModule, TabletHardwareUiModule>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHardwareUiModule, SmartWatchHardwareUiModule>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHardwareUiModule, TvHardwareUiModule>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHardwareUiModule, MediaPlayerHardwareUiModule>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHardwareUiModule, SmartSpeakerHardwareUiModule>());

@@ -8,17 +8,17 @@ namespace NetAdmin.Providers.Xiaomi;
 
 public sealed class XiaomiProviderPlugin : INetAdminProviderPlugin
 {
-    public string ProviderName => "Xiaomi";
+    public string ProviderName => "XiaoMi";
 
     public void RegisterServices(IServiceCollection services, IConfiguration configuration)
     {
-        services.AddXiaomiProvider();
+        services.AddXiaoMiProvider();
     }
 }
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddXiaomiProvider(this IServiceCollection services)
+    public static IServiceCollection AddXiaoMiProvider(this IServiceCollection services)
     {
         services.TryAddSingleton<ProductCatalogRegistry>();
 
