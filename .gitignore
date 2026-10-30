@@ -14,6 +14,8 @@ publish/
 ## Local SQLite databases & app data
 appdata/
 **/data/
+!src/NetAdmin.Infrastructure/Data/
+!src/NetAdmin.Infrastructure/Data/**
 *.db
 *.db-shm
 *.db-wal

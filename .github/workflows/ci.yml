@@ -22,6 +22,24 @@ jobs:
     - name: Restore
       run: dotnet restore
 
+    - name: Show Infrastructure Data files (debug)
+      run: |
+        echo "Listing src/NetAdmin.Infrastructure/Data";
+        ls -la src/NetAdmin.Infrastructure/Data || true;
+        echo "--- AppDbContext.cs head ---";
+        sed -n '1,80p' src/NetAdmin.Infrastructure/Data/AppDbContext.cs || true;
+
+
+    - name: Run diagnostic build for Infrastructure (diagnose namespace issues)
+      run: dotnet build src/NetAdmin.Infrastructure/NetAdmin.Infrastructure.csproj -v diag || true
+
+    - name: Install dotnet-format
+      run: |
+        dotnet tool install --tool-path ./tools dotnet-format
+
+    - name: Run dotnet-format (check)
+      run: ./tools/dotnet-format --verify-no-changes --folder || true
+
     - name: Build
       run: dotnet build --no-restore --configuration Release
 
