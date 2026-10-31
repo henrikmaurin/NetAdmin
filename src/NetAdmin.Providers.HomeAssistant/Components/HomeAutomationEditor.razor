@@ -4,6 +4,8 @@
 @using NetAdmin.Core.Providers
 @inherits NetAdmin.Core.Components.CatalogDeviceEditorBase<HardwareDevice>
 @inject IHomeAssistantProvider HomeAssistantProvider
+@inject NetAdmin.Core.Services.IHomeAssistantSyncService HaSyncService
+@inject NetAdmin.Core.Models.IHardwareInventoryProvider HardwareProvider
 
 @{
     var vendors = GetCatalogVendors();
@@ -95,6 +97,47 @@
             <strong>@selectedProduct.FullName:</strong> @selectedProduct.Description
         </div>
     }
+
+    <div style="margin-top: 0.75rem;">
+        <button class="form-button" @onclick="SyncEntitiesAsync" disabled="@_isSyncing">@(_isSyncing ? "⏳ Syncing..." : "🔁 Sync Entities from Home Assistant (/api/states)")</button>
+    </div>
+
+    @if (_syncResults is not null)
+    {
+        <div style="margin-top:0.75rem;">
+            <h5>Synced Entities</h5>
+            <table class="table">
+                <thead>
+                    <tr><th>Entity</th><th>Name</th><th>Matched Device</th><th>Candidates</th><th></th></tr>
+                </thead>
+                <tbody>
+                @foreach (var r in _syncResults)
+                {
+                    <tr>
+                        <td>@r.EntityId</td>
+                        <td>@r.Name</td>
+                        <td>
+                            <select value="@(r.LinkedDeviceId ?? "")" @onchange="@(e => OnSelectDeviceChanged(r.ServiceId, e.Value?.ToString()))">
+                                <option value="">-- No linked device --</option>
+                                @foreach (var d in _allDevices ?? Array.Empty<NetAdmin.Core.Models.HardwareDevice>())
+                                {
+                                    <option value="@d.Id">@d.Name @if(!string.IsNullOrWhiteSpace(d.IpAddress)) { <text>• @d.IpAddress</text> } @if(string.IsNullOrWhiteSpace(d.IpAddress) && !string.IsNullOrWhiteSpace(d.MacAddress)) { <text>• @d.MacAddress</text> }</option>
+                                }
+                            </select>
+                        </td>
+                        <td>@string.Join(", ", r.CandidateIdentifiers)</td>
+                        <td>
+                            @if (!string.IsNullOrWhiteSpace(r.LinkedDeviceId))
+                            {
+                                <button class="form-button" @onclick="() => ClearLinkAsync(r.ServiceId)">Unlink</button>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
 </div>
 
 @code {
@@ -104,6 +147,9 @@
     private bool _statusSuccess;
     private string? _statusMessage;
     private HomeAssistantStatusSummary? _statusSummary;
+    private IReadOnlyList<NetAdmin.Core.Services.HomeAssistantSyncResult>? _syncResults;
+    private bool _isSyncing;
+    private IReadOnlyList<NetAdmin.Core.Models.HardwareDevice>? _allDevices;
 
     private async Task ProbeHomeAssistantAsync()
     {
@@ -130,5 +176,35 @@
         {
             _isProbing = false;
         }
+    }
+
+    private async Task SyncEntitiesAsync()
+    {
+        _isSyncing = true;
+        try
+        {
+            var targetUrl = !string.IsNullOrWhiteSpace(Device.ManagementUrl) ? Device.ManagementUrl : Device.IpAddress;
+            _syncResults = await HaSyncService.SyncEntitiesAsync(Device.Id, targetUrl);
+            // Load hardware inventory for selection
+            _allDevices = await HardwareProvider.GetAllHardwareAsync();
+        }
+        finally
+        {
+            _isSyncing = false;
+        }
+    }
+
+    private async Task ClearLinkAsync(string serviceId)
+    {
+        await HaSyncService.SetServiceLinkAsync(serviceId, null);
+        await SyncEntitiesAsync();
+    }
+
+    private async Task OnSelectDeviceChanged(string serviceId, string? selectedDeviceId)
+    {
+        // selectedDeviceId may be null or empty to clear the link
+        var link = string.IsNullOrWhiteSpace(selectedDeviceId) ? null : selectedDeviceId;
+        await HaSyncService.SetServiceLinkAsync(serviceId, link);
+        await SyncEntitiesAsync();
     }
 }
