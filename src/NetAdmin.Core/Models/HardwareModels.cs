@@ -176,6 +176,7 @@ public record CameraHardwareDevice(
     int PortCount = 1,
     string? RtspPath = null,
     string Notes = "",
+    string? NvrId = null,
     string TagsCsv = "camera, frigate",
     IReadOnlyList<CameraStreamDefinition>? Streams = null)
     : HardwareDevice(Id, Name, HardwareCategory.Camera, IpAddress, MacAddress, Room, PortCount, !string.IsNullOrWhiteSpace(IpAddress) ? $"http://{IpAddress}" : null, Notes, TagsCsv, Vendor, Model)

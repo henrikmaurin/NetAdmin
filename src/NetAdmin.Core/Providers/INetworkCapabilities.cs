@@ -114,6 +114,19 @@ public record FrigateStatusSummary(
 public interface IFrigateProvider : INetworkIntegration
 {
     Task<FrigateStatusSummary?> GetStatusAsync(string? deviceId = null, string? ipOrUrl = null, CancellationToken ct = default);
+
+    // Add or remove cameras via a go2rtc instance. Implementations should
+    // resolve an optional go2rtc base URL from device settings (e.g. "go2rtc:BaseUrl")
+    // or global settings (e.g. "Go2Rtc:BaseUrl") when go2rtcBaseUrl is null.
+    Task<bool> AddCameraViaGo2RtcAsync(string? deviceId, string cameraName, string rtspUrl, string? go2rtcBaseUrl = null, CancellationToken ct = default);
+    Task<bool> RemoveCameraViaGo2RtcAsync(string? deviceId, string cameraName, string? go2rtcBaseUrl = null, CancellationToken ct = default);
+
+    // Add or remove a camera entry in Frigate's configuration via the Frigate API.
+    // Implementations should use the same Frigate base URL and api token used for GetStatusAsync
+    // when frigateBaseUrl/apiToken are null.
+    Task<bool> AddCameraToFrigateAsync(string? deviceId, string cameraName, string rtspUrl, string? frigateBaseUrl = null, CancellationToken ct = default);
+    Task<bool> RemoveCameraFromFrigateAsync(string? deviceId, string cameraName, string? frigateBaseUrl = null, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<string, string?>> GetCameraSourcesAsync(string? deviceId = null, string? frigateBaseUrl = null, CancellationToken ct = default);
 }
 
 public record HomeAssistantStatusSummary(

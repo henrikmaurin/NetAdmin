@@ -59,6 +59,11 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
                 .IsRequired()
                 .HasColumnType("TEXT");
 
+            b.Property<string>("NvrId")
+                .HasColumnType("TEXT");
+
+            b.HasIndex("NvrId");
+
             b.Property<string>("SubModel")
                 .IsRequired()
                 .HasColumnType("TEXT");

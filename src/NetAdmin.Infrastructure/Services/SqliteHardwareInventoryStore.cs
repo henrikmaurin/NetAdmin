@@ -85,6 +85,7 @@ public class SqliteHardwareInventoryStore(IDbContextFactory<AppDbContext> dbFact
                 break;
             case CameraHardwareDevice cam:
                 entity.StreamsJson = JsonSerializer.Serialize(cam.EffectiveStreams);
+                entity.NvrId = cam.NvrId;
                 break;
         }
 
@@ -184,7 +185,7 @@ public class SqliteHardwareInventoryStore(IDbContextFactory<AppDbContext> dbFact
                 e.Id, e.Name, e.IpAddress, e.MacAddress, e.Room,
                 e.Vendor, e.SubModel, e.PortCount,
                 DeserializeStreams(e.StreamsJson).FirstOrDefault()?.Url,
-                e.Notes, e.TagsCsv,
+                e.Notes, e.NvrId, e.TagsCsv,
                 DeserializeStreams(e.StreamsJson)),
 
             HardwareCategory.Switch => new SwitchHardwareDevice(
