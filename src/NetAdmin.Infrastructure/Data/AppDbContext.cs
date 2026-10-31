@@ -93,17 +93,19 @@ public class PhysicalLinkEntity : TaggableEntityBase
     public string CableLabel { get; set; } = string.Empty;
 }
 
-public class HardwareDeviceEntity : TaggableEntityBase
-{
-    public string Id { get; set; } = string.Empty;
-    public string Name { get; set; } = string.Empty;
-    public HardwareCategory Category { get; set; }
-    public string? IpAddress { get; set; }
-    public string? MacAddress { get; set; }
-    public string Room { get; set; } = string.Empty;
-    public int PortCount { get; set; } = 1;
-    public string? ManagementUrl { get; set; }
-    public string Notes { get; set; } = string.Empty;
+    public class HardwareDeviceEntity : TaggableEntityBase
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public HardwareCategory Category { get; set; }
+        public string? IpAddress { get; set; }
+        public string? MacAddress { get; set; }
+        public string Room { get; set; } = string.Empty;
+        public int PortCount { get; set; } = 1;
+        public string? ManagementUrl { get; set; }
+        public string Notes { get; set; } = string.Empty;
+        // Optional relation to an NVR device id when this hardware device is a camera managed by an NVR (e.g. Frigate)
+        public string? NvrId { get; set; }
 
     public string Vendor { get; set; } = string.Empty;
     public string SubModel { get; set; } = string.Empty;
