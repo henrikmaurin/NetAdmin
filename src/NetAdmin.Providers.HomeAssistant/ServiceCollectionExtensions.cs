@@ -23,6 +23,7 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(5);
         });
         services.AddScoped<IHomeAssistantProvider>(sp => sp.GetRequiredService<HomeAssistantProvider>());
+        services.AddScoped<IServiceIntegration>(sp => sp.GetRequiredService<HomeAssistantProvider>());
         return services;
     }
 }

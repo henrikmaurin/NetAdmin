@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using NetAdmin.Core.Models;
 using NetAdmin.Core.Providers;
 
 namespace NetAdmin.Web.Services;
@@ -24,9 +25,15 @@ public class ServiceProviderRegistry
     public IServiceIntegration? GetProviderForType(string type)
     {
         if (string.IsNullOrWhiteSpace(type)) return null;
-        var all = AllProviders();
-        // Prefer case-insensitive exact name match
-        var match = all.FirstOrDefault(p => string.Equals(p.ProviderName, type, StringComparison.OrdinalIgnoreCase));
-        return match ?? all.FirstOrDefault();
+
+        var providers = AllProviders().ToList();
+        var providerByName = providers.FirstOrDefault(provider =>
+            string.Equals(provider.ProviderName, type, StringComparison.OrdinalIgnoreCase));
+        if (providerByName is not null)
+            return providerByName;
+
+        return Enum.TryParse<ServiceType>(type, ignoreCase: true, out var serviceType)
+            ? providers.FirstOrDefault(provider => provider.SupportedServiceTypes.Contains(serviceType))
+            : null;
     }
 }

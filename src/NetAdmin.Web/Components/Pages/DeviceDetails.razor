@@ -1,10 +1,14 @@
 ﻿@page "/device/{Id}"
 @rendermode InteractiveServer
+@using System.Net.WebSockets
+@using System.Text.Json
 @using NetAdmin.Core.Models
 @using NetAdmin.Core.Providers
 @using NetAdmin.Infrastructure.Services
 @inject IHardwareInventoryProvider HardwareProvider
 @inject IPhysicalLinkProvider PhysicalLinkProvider
+@inject ILinkedServiceProvider LinkedServiceProvider
+@inject NetAdmin.Core.Services.IHomeAssistantSyncService HomeAssistantSyncService
 @inject NavigationManager Navigation
 @inject IRoomProvider RoomProvider
 @inject NetworkTraceService TraceService
@@ -231,6 +235,17 @@
                                              f.GlobalSettingKey?.StartsWith("Frigate:") == true ||
                                              f.GlobalSettingKey?.StartsWith("HomeAssistant:") == true))
                     {
+                        <button @onclick="MigrateGlobalsToThisDeviceAsync"
+                                style="padding: 0.5rem 1rem; background: #f59e0b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                            🔁 Copy Global Settings To This Device
+                        </button>
+                    }
+
+                    @if (credFields.Any(f => f.GlobalSettingKey?.StartsWith("OpnSense:") == true ||
+                                             f.GlobalSettingKey?.StartsWith("UniFi:") == true ||
+                                             f.GlobalSettingKey?.StartsWith("Frigate:") == true ||
+                                             f.GlobalSettingKey?.StartsWith("HomeAssistant:") == true))
+                    {
                         <button @onclick="SaveAndTestApiConnectionAsync"
                                 disabled="@_isTestingApi"
                                 style="padding: 0.5rem 1rem; background: #0f172a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
@@ -258,6 +273,155 @@
                 }
             </div>
         }
+
+        <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+            <h3 style="margin-top: 0;">🧩 Connected Services</h3>
+            @if (_linkedServices.Count == 0)
+            {
+                <p style="color: #64748b; font-size: 0.9rem;">No services are linked to this device yet.</p>
+            }
+            else
+            {
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                    <thead>
+                        <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                            <th style="padding: 0.6rem;">Service</th>
+                            <th style="padding: 0.6rem;">Type</th>
+                            <th style="padding: 0.6rem;">Entity / Service ID</th>
+                            <th style="padding: 0.6rem;">Service instance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var service in _linkedServices)
+                        {
+                            <tr style="border-bottom: 1px solid #e2e8f0;">
+                                <td style="padding: 0.6rem; font-weight: 600;">@service.Name</td>
+                                <td style="padding: 0.6rem;">@service.Type</td>
+                                <td style="padding: 0.6rem; font-family: monospace; color: #475569;">
+                                    @GetServiceIdentifier(service.Id, service.IsServiceInstance)
+                                    @if (_activeModule?.ModuleId == "shelly" && service.Id.StartsWith("homeassistant:", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        <button @onclick="() => UnlinkHomeAssistantServiceAsync(service.Id)" style="margin-left: 0.5rem; padding: 0.2rem 0.45rem; color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; cursor: pointer;">Unlink</button>
+                                    }
+                                </td>
+                                <td style="padding: 0.6rem;">
+                                    @if (service.ParentServiceDeviceId is { } homeAssistantId)
+                                    {
+                                        var homeAssistantDevice = _inventoryDevices.FirstOrDefault(device => device.Id == homeAssistantId);
+                                        <a href="/device/@homeAssistantId" style="color: #0284c7;">@(homeAssistantDevice?.Name ?? "Home Assistant")</a>
+                                    }
+                                    else
+                                    {
+                                        <span style="color: #64748b;">—</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            <a href="/services" style="display: inline-block; margin-top: 0.5rem; color: #0284c7; font-size: 0.85rem;">Manage services →</a>
+
+            @if (_activeModule?.ModuleId == "homeautomation-ha")
+            {
+                <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                        <h4 style="margin: 0;">Home Assistant entity links</h4>
+                        <button @onclick="DiscoverHomeAssistantEntitiesAsync" disabled="@_isDiscoveringHomeAssistant" style="padding: 0.45rem 0.75rem; background: #0284c7; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            @(_isDiscoveringHomeAssistant ? "Discovering..." : "Discover / refresh entities")
+                        </button>
+                    </div>
+                    <p style="color: #64748b; font-size: 0.85rem;">Choose the hardware device associated with each Home Assistant entity. Entities without a detected hardware match can be linked here manually.</p>
+                    @if (!string.IsNullOrWhiteSpace(_homeAssistantLinkMessage))
+                    {
+                        <p role="status" style="color: @(_homeAssistantLinkError ? "#991b1b" : "#166534");">@_homeAssistantLinkMessage</p>
+                    }
+                    @if (_homeAssistantEntities.Count == 0)
+                    {
+                        <p style="color: #64748b; font-size: 0.9rem;">No Home Assistant entities are available yet. Discover entities to load them from Home Assistant.</p>
+                    }
+                    else
+                    {
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                            <thead>
+                                <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                                    <th style="padding: 0.6rem;">Entity</th>
+                                    <th style="padding: 0.6rem;">Linked hardware</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var entity in _homeAssistantEntities)
+                                {
+                                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                                        <td style="padding: 0.6rem;">@entity.Name <span style="font-family: monospace; color: #64748b;">(@GetServiceIdentifier(entity.Id))</span></td>
+                                        <td style="padding: 0.6rem;">
+                                            <select value="@entity.LinkedDeviceId" @onchange="args => SetHomeAssistantEntityLinkAsync(entity.Id, args)" disabled="@_isUpdatingHomeAssistantLink" style="min-width: 220px; padding: 0.4rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                                                <option value="">Not linked</option>
+                                                @if (!string.IsNullOrWhiteSpace(entity.LinkedDeviceId) && !_inventoryDevices.Any(device => device.Id == entity.LinkedDeviceId))
+                                                {
+                                                    <option value="@entity.LinkedDeviceId">Unknown device (@entity.LinkedDeviceId)</option>
+                                                }
+                                                @foreach (var hardware in _inventoryDevices.OrderBy(device => device.Name))
+                                                {
+                                                    <option value="@hardware.Id">@hardware.Name</option>
+                                                }
+                                            </select>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            }
+
+            @if (_activeModule?.ModuleId == "shelly")
+            {
+                <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
+                    <h4 style="margin: 0 0 0.5rem 0;">Link Home Assistant entities</h4>
+                    @if (_homeAssistantDevices.Count == 0)
+                    {
+                        <p style="color: #64748b; font-size: 0.9rem;">Add a Home Assistant device to the hardware inventory before discovering its entities.</p>
+                    }
+                    else
+                    {
+                        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                            <select value="@_selectedHomeAssistantDeviceId" @onchange="OnHomeAssistantSelectedAsync" style="padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                                <option value="">-- Select Home Assistant --</option>
+                                @foreach (var homeAssistant in _homeAssistantDevices)
+                                {
+                                    <option value="@homeAssistant.Id">@homeAssistant.Name</option>
+                                }
+                            </select>
+                            <button @onclick="DiscoverShellyEntitiesAsync" disabled="@(_isDiscoveringHomeAssistant || string.IsNullOrWhiteSpace(_selectedHomeAssistantDeviceId))" style="padding: 0.45rem 0.75rem; background: #0284c7; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                @(_isDiscoveringHomeAssistant ? "Discovering..." : "Discover Home Assistant entities")
+                            </button>
+                        </div>
+                        @if (_availableHomeAssistantServices.Count > 0)
+                        {
+                            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem;">
+                                <select @bind="_selectedHomeAssistantServiceId" style="min-width: 260px; padding: 0.45rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                                    <option value="">-- Select an unlinked entity --</option>
+                                    @foreach (var service in _availableHomeAssistantServices)
+                                    {
+                                        <option value="@service.Id">@service.Name (@GetServiceIdentifier(service.Id))</option>
+                                    }
+                                </select>
+                                <button @onclick="LinkHomeAssistantServiceAsync" disabled="@string.IsNullOrWhiteSpace(_selectedHomeAssistantServiceId)" style="padding: 0.45rem 0.75rem; background: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer;">Link to this Shelly</button>
+                            </div>
+                        }
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_homeAssistantLinkMessage))
+                    {
+                        <p role="status" style="margin: 0.6rem 0 0; color: @(_homeAssistantLinkError ? "#991b1b" : "#166534"); font-size: 0.9rem;">@_homeAssistantLinkMessage</p>
+                    }
+                    @if (_activeModule?.ModuleId == "shelly" && _homeAssistantDevices.Count > 0 && _availableHomeAssistantServices.Count == 0)
+                    {
+                        <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 0;">No unlinked Home Assistant entities are available yet. Discover entities above; Shelly registry entities can also be linked manually.</p>
+                    }
+                </div>
+            }
+        </div>
 
         <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
@@ -358,6 +522,17 @@
     private HardwareDevice? _device;
     private IHardwareUiModule? _activeModule;
     private List<PhysicalLink> _deviceLinks = [];
+    private IReadOnlyList<LinkedServiceSummary> _linkedServices = [];
+    private IReadOnlyList<HardwareDevice> _inventoryDevices = [];
+    private IReadOnlyList<LinkedServiceSummary> _homeAssistantEntities = [];
+    private IReadOnlyList<HardwareDevice> _homeAssistantDevices = [];
+    private IReadOnlyList<LinkedServiceSummary> _availableHomeAssistantServices = [];
+    private string? _selectedHomeAssistantDeviceId;
+    private string? _selectedHomeAssistantServiceId;
+    private string? _homeAssistantLinkMessage;
+    private bool _homeAssistantLinkError;
+    private bool _isDiscoveringHomeAssistant;
+    private bool _isUpdatingHomeAssistantLink;
     private string? _statusMessage;
 
     private IReadOnlyList<RoomItem> _availableRooms = [];
@@ -392,8 +567,133 @@
 
         var allLinks = await PhysicalLinkProvider.GetLinksAsync();
         _deviceLinks = allLinks.Where(l => l.SourceDeviceId == _device.Id || l.TargetDeviceId == _device.Id).ToList();
+        _linkedServices = await LinkedServiceProvider.GetLinkedServicesAsync(_device.Id);
+        if (_activeModule.ModuleId is "shelly" or "homeautomation-ha")
+        {
+            _inventoryDevices = await HardwareProvider.GetAllHardwareAsync();
+        }
+
+        if (_activeModule.ModuleId == "shelly")
+        {
+            _homeAssistantDevices = _inventoryDevices
+                .Where(device => TypeRegistry.Resolve(device).ModuleId == "homeautomation-ha")
+                .OrderBy(device => device.Name)
+                .ToArray();
+            if (_homeAssistantDevices.Count == 1)
+            {
+                _selectedHomeAssistantDeviceId = _homeAssistantDevices[0].Id;
+                _availableHomeAssistantServices = await LinkedServiceProvider.GetAvailableHomeAssistantServicesAsync(_selectedHomeAssistantDeviceId);
+            }
+        }
+        else if (_activeModule.ModuleId == "homeautomation-ha")
+        {
+            _selectedHomeAssistantDeviceId = _device.Id;
+            _homeAssistantEntities = await LinkedServiceProvider.GetHomeAssistantEntitiesAsync(_device.Id);
+        }
 
         await LoadCredentialsForDeviceAsync();
+    }
+
+    private static string GetServiceIdentifier(string serviceId, bool isServiceInstance = false) =>
+        isServiceInstance || HomeAssistantServiceIds.IsInstanceServiceId(serviceId)
+            ? "Home Assistant instance"
+            : HomeAssistantServiceIds.GetEntityIdentifier(serviceId);
+
+    private async Task OnHomeAssistantSelectedAsync(ChangeEventArgs args)
+    {
+        _selectedHomeAssistantDeviceId = args.Value?.ToString();
+        _selectedHomeAssistantServiceId = null;
+        _availableHomeAssistantServices = string.IsNullOrWhiteSpace(_selectedHomeAssistantDeviceId)
+            ? []
+            : await LinkedServiceProvider.GetAvailableHomeAssistantServicesAsync(_selectedHomeAssistantDeviceId);
+    }
+
+    private Task DiscoverShellyEntitiesAsync() => DiscoverHomeAssistantEntitiesAsync();
+
+    private async Task DiscoverHomeAssistantEntitiesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedHomeAssistantDeviceId))
+            return;
+
+        _isDiscoveringHomeAssistant = true;
+        _homeAssistantLinkError = false;
+        _homeAssistantLinkMessage = null;
+        try
+        {
+            var discovered = await HomeAssistantSyncService.SyncEntitiesAsync(_selectedHomeAssistantDeviceId);
+            await RefreshLinkedServicesAsync();
+            _homeAssistantLinkMessage = $"Discovery completed. {discovered.Count} Home Assistant entities were processed.";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or WebSocketException or InvalidOperationException or JsonException or TimeoutException)
+        {
+            _homeAssistantLinkError = true;
+            _homeAssistantLinkMessage = $"Home Assistant discovery failed: {ex.Message}";
+        }
+        finally
+        {
+            _isDiscoveringHomeAssistant = false;
+        }
+    }
+
+    private async Task LinkHomeAssistantServiceAsync()
+    {
+        if (_device is null || string.IsNullOrWhiteSpace(_selectedHomeAssistantServiceId))
+            return;
+
+        await HomeAssistantSyncService.SetServiceLinkAsync(_selectedHomeAssistantServiceId, _device.Id);
+        _selectedHomeAssistantServiceId = null;
+        await RefreshLinkedServicesAsync();
+        _homeAssistantLinkError = false;
+        _homeAssistantLinkMessage = "Home Assistant entity linked to this Shelly device.";
+    }
+
+    private async Task UnlinkHomeAssistantServiceAsync(string serviceId)
+    {
+        await HomeAssistantSyncService.SetServiceLinkAsync(serviceId, null);
+        await RefreshLinkedServicesAsync();
+    }
+
+    private async Task SetHomeAssistantEntityLinkAsync(string serviceId, ChangeEventArgs args)
+    {
+        _isUpdatingHomeAssistantLink = true;
+        _homeAssistantLinkError = false;
+        _homeAssistantLinkMessage = null;
+        try
+        {
+            var linkedDeviceId = args.Value?.ToString();
+            await HomeAssistantSyncService.SetServiceLinkAsync(serviceId, linkedDeviceId);
+            await RefreshLinkedServicesAsync();
+            _homeAssistantLinkMessage = string.IsNullOrWhiteSpace(linkedDeviceId)
+                ? "Home Assistant entity unlinked."
+                : "Home Assistant entity link updated.";
+        }
+        catch (ArgumentException ex)
+        {
+            _homeAssistantLinkError = true;
+            _homeAssistantLinkMessage = $"Could not update entity link: {ex.Message}";
+        }
+        finally
+        {
+            _isUpdatingHomeAssistantLink = false;
+        }
+    }
+
+    private async Task RefreshLinkedServicesAsync()
+    {
+        if (_device is null)
+            return;
+
+        _linkedServices = await LinkedServiceProvider.GetLinkedServicesAsync(_device.Id);
+        if (_activeModule?.ModuleId == "homeautomation-ha")
+        {
+            _homeAssistantEntities = await LinkedServiceProvider.GetHomeAssistantEntitiesAsync(_device.Id);
+        }
+        else
+        {
+            _availableHomeAssistantServices = string.IsNullOrWhiteSpace(_selectedHomeAssistantDeviceId)
+                ? []
+                : await LinkedServiceProvider.GetAvailableHomeAssistantServicesAsync(_selectedHomeAssistantDeviceId);
+        }
     }
 
     private async Task LoadCredentialsForDeviceAsync()
@@ -404,11 +704,9 @@
         {
             foreach (var field in _activeModule.GetCredentialFields(_device))
             {
+                // Load only per-device credentials. Do not fall back to global settings —
+                // credentials should be tied to the specific hardware/service device.
                 var val = await SettingsService.GetSettingAsync($"device:{_device.Id}:{field.KeySuffix}");
-                if (string.IsNullOrWhiteSpace(val) && !string.IsNullOrWhiteSpace(field.GlobalSettingKey))
-                {
-                    val = await SettingsService.GetSettingAsync(field.GlobalSettingKey, field.GlobalSettingKey);
-                }
                 _credentialValues[field.KeySuffix] = val ?? "";
             }
         }
@@ -572,20 +870,49 @@
     {
         if (_device is null || _activeModule is null) return;
 
-        foreach (var field in _activeModule.GetCredentialFields(_device))
-        {
-            _credentialValues.TryGetValue(field.KeySuffix, out var rawVal);
-            var normalized = string.IsNullOrWhiteSpace(rawVal) ? null : rawVal.Trim();
-            await SettingsService.SaveSettingAsync($"device:{_device.Id}:{field.KeySuffix}", normalized);
-
-            if (!string.IsNullOrWhiteSpace(field.GlobalSettingKey) && normalized is not null)
+            foreach (var field in _activeModule.GetCredentialFields(_device))
             {
-                await SettingsService.SaveSettingAsync(field.GlobalSettingKey, normalized);
+                _credentialValues.TryGetValue(field.KeySuffix, out var rawVal);
+                var normalized = string.IsNullOrWhiteSpace(rawVal) ? null : rawVal.Trim();
+                // Save only to the device-scoped encrypted setting. Do NOT sync to global keys.
+                await SettingsService.SaveSettingAsync($"device:{_device.Id}:{field.KeySuffix}", normalized);
             }
-        }
 
         _credError = false;
         _credStatus = "✅ Encrypted credentials saved for this device.";
+    }
+
+    private async Task MigrateGlobalsToThisDeviceAsync()
+    {
+        if (_device is null || _activeModule is null) return;
+
+        var messages = new List<string>();
+        foreach (var field in _activeModule.GetCredentialFields(_device))
+        {
+            if (string.IsNullOrWhiteSpace(field.GlobalSettingKey)) continue;
+
+            var deviceKey = $"device:{_device.Id}:{field.KeySuffix}";
+            var current = await SettingsService.GetSettingAsync(deviceKey);
+            if (!string.IsNullOrWhiteSpace(current))
+            {
+                messages.Add($"Skipped {field.KeySuffix}: device already has a value.");
+                continue;
+            }
+
+            var global = await SettingsService.GetSettingAsync(field.GlobalSettingKey, field.GlobalSettingKey);
+            if (string.IsNullOrWhiteSpace(global))
+            {
+                messages.Add($"No global value for {field.GlobalSettingKey}.");
+                continue;
+            }
+
+            await SettingsService.SaveSettingAsync(deviceKey, global);
+            messages.Add($"Copied {field.GlobalSettingKey} → {deviceKey}.");
+        }
+
+        _credStatus = string.Join("\n", messages);
+        _credError = false;
+        await LoadCredentialsForDeviceAsync();
     }
 
     private async Task SaveAndTestApiConnectionAsync()

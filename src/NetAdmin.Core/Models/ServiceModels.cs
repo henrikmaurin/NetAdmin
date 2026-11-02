@@ -32,3 +32,12 @@ public record ServiceStatus(
     string? Version = null,
     string? Summary = null,
     object? Details = null);
+
+public record LinkedServiceSummary(
+    string Id,
+    string Name,
+    string Type,
+    string? LinkedDeviceId = null,
+    string? ParentServiceId = null,
+    string? ParentServiceDeviceId = null,
+    bool IsServiceInstance = false);

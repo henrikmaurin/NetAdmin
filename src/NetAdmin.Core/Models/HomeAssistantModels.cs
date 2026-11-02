@@ -4,8 +4,7 @@ namespace NetAdmin.Core.Models;
 
 /// <summary>
 /// Lightweight representation of a Home Assistant entity returned by the provider.
-/// Includes a set of candidate identifiers (IPs, MACs, device ids) to help matching
-/// against local NetAdmin hardware records.
+/// Candidate device identifiers contain network addresses used to match local hardware.
 /// </summary>
 public record HomeAssistantEntity(
     string EntityId,
@@ -14,4 +13,14 @@ public record HomeAssistantEntity(
     string? DeviceClass,
     string? UnitOfMeasure,
     string AttributesJson,
-    IReadOnlyList<string> CandidateDeviceIdentifiers);
+    IReadOnlyList<string> CandidateDeviceIdentifiers,
+    bool IsShellyDevice = false);
+
+public record HomeAssistantDevice(
+    string Id,
+    string Name,
+    string? Manufacturer,
+    string? Model,
+    IReadOnlyList<string> CandidateDeviceIdentifiers,
+    IReadOnlyList<string> EntityIds,
+    bool IsShellyDevice = false);

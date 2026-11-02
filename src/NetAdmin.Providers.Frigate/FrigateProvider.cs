@@ -10,6 +10,7 @@ public class FrigateProvider(
     : HttpIntegrationProviderBase(httpClient, settingsService), IFrigateProvider, NetAdmin.Core.Providers.IServiceIntegration
 {
     public override string ProviderName => "Frigate NVR";
+    public IReadOnlyCollection<NetAdmin.Core.Models.ServiceType> SupportedServiceTypes => [NetAdmin.Core.Models.ServiceType.Nvr];
 
     public override async Task<bool> TestConnectionAsync(CancellationToken ct = default)
     {
@@ -279,9 +280,9 @@ public class FrigateProvider(
         }
     }
 
-    public async Task<NetAdmin.Core.Models.ServiceStatus?> GetServiceStatusAsync(string? serviceId = null, string? baseUrl = null, CancellationToken ct = default)
+    public async Task<NetAdmin.Core.Models.ServiceStatus?> GetServiceStatusAsync(string? serviceId = null, string? baseUrl = null, string? linkedDeviceId = null, CancellationToken ct = default)
     {
-        var sum = await GetStatusAsync(serviceId, baseUrl, ct);
+        var sum = await GetStatusAsync(linkedDeviceId ?? serviceId, baseUrl, ct);
         if (sum is null) return null;
 
         var summary = $"Cameras={sum.CameraCount}; Detectors={string.Join(',', sum.Detectors)}";
