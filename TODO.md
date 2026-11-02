@@ -12,10 +12,12 @@
 - [x] `Frigate` NVR provider project (`NetAdmin.Providers.Frigate`) with `HardwareCategory.Nvr`, API client, UI module, and product catalog
 - [x] `HomeAssistant` provider project (`NetAdmin.Providers.HomeAssistant`) with `HardwareCategory.HomeAutomation`, API client, UI module, and product catalog
 
-## Next Up (Backlog)
-- [ ] **Frigate Camera Auto-Sync**: Import or link Frigate camera definitions directly to `CameraHardwareDevice` inventory items and RTSP stream definitions
-- [ ] **Home Assistant Entity Discovery**: Correlate Home Assistant device tracker / network entities with NetAdmin MAC/IP inventory
-- [ ] **Proxmox VE Provider (`NetAdmin.Providers.Proxmox`)**: Query node status, VMs, and LXC containers for `HardwareCategory.Server`
-- [ ] **MQTT / Zigbee2MQTT Provider (`NetAdmin.Providers.Zigbee2Mqtt`)**: Inspect coordinator status and Zigbee mesh devices
-- [ ] **Automated Network Discovery**: Scheduled background ARP/DHCP/mDNS scan with one-click device registration
-- [ ] **Backup & Export**: Encrypted export/import of SQLite inventory and settings
+## Backlog
+Open tasks are tracked as GitHub issues:
+- [#5](https://github.com/henrikmaurin/NetAdmin/issues/5) Frigate Camera Auto-Sync
+- [#6](https://github.com/henrikmaurin/NetAdmin/issues/6) Home Assistant Entity Discovery
+- [#7](https://github.com/henrikmaurin/NetAdmin/issues/7) Proxmox VE Provider
+- [#8](https://github.com/henrikmaurin/NetAdmin/issues/8) MQTT / Zigbee2MQTT Provider
+- [#9](https://github.com/henrikmaurin/NetAdmin/issues/9) Automated Network Discovery
+- [#10](https://github.com/henrikmaurin/NetAdmin/issues/10) Backup & Export
+- [ ] Add links to the UniFi app for UniFi products

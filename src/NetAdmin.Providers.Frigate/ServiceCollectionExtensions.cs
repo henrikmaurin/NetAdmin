@@ -23,6 +23,7 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(5);
         });
         services.AddScoped<IFrigateProvider>(sp => sp.GetRequiredService<FrigateProvider>());
+        services.AddScoped<IServiceIntegration>(sp => sp.GetRequiredService<FrigateProvider>());
         return services;
     }
 }

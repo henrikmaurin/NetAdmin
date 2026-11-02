@@ -1,5 +1,7 @@
 @using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Web
+@using System.Net.WebSockets
+@using System.Text.Json
 @using NetAdmin.Core.Models
 @using NetAdmin.Core.Providers
 @inherits NetAdmin.Core.Components.CatalogDeviceEditorBase<HardwareDevice>
@@ -99,43 +101,56 @@
     }
 
     <div style="margin-top: 0.75rem;">
-        <button class="form-button" @onclick="SyncEntitiesAsync" disabled="@_isSyncing">@(_isSyncing ? "⏳ Syncing..." : "🔁 Sync Entities from Home Assistant (/api/states)")</button>
+        <button class="form-button" @onclick="SyncEntitiesAsync" disabled="@_isSyncing">@(_isSyncing ? "⏳ Discovering..." : "🔎 Discover network entities")</button>
     </div>
+
+    @if (!string.IsNullOrWhiteSpace(_syncErrorMessage))
+    {
+        <div role="alert" style="margin-top:0.75rem; padding:0.75rem; color:#991b1b; background:#fef2f2; border:1px solid #f87171; border-radius:6px;">@_syncErrorMessage</div>
+    }
 
     @if (_syncResults is not null)
     {
         <div style="margin-top:0.75rem;">
-            <h5>Synced Entities</h5>
-            <table class="table">
-                <thead>
-                    <tr><th>Entity</th><th>Name</th><th>Matched Device</th><th>Candidates</th><th></th></tr>
-                </thead>
-                <tbody>
-                @foreach (var r in _syncResults)
-                {
-                    <tr>
-                        <td>@r.EntityId</td>
-                        <td>@r.Name</td>
-                        <td>
-                            <select value="@(r.LinkedDeviceId ?? "")" @onchange="@(e => OnSelectDeviceChanged(r.ServiceId, e.Value?.ToString()))">
-                                <option value="">-- No linked device --</option>
-                                @foreach (var d in _allDevices ?? Array.Empty<NetAdmin.Core.Models.HardwareDevice>())
-                                {
-                                    <option value="@d.Id">@d.Name @if(!string.IsNullOrWhiteSpace(d.IpAddress)) { <text>• @d.IpAddress</text> } @if(string.IsNullOrWhiteSpace(d.IpAddress) && !string.IsNullOrWhiteSpace(d.MacAddress)) { <text>• @d.MacAddress</text> }</option>
-                                }
-                            </select>
-                        </td>
-                        <td>@string.Join(", ", r.CandidateIdentifiers)</td>
-                        <td>
-                            @if (!string.IsNullOrWhiteSpace(r.LinkedDeviceId))
-                            {
-                                <button class="form-button" @onclick="() => ClearLinkAsync(r.ServiceId)">Unlink</button>
-                            }
-                        </td>
-                    </tr>
-                }
-                </tbody>
-            </table>
+            <h5>Discovered Network Entities</h5>
+            <p style="color:#64748b; font-size:0.85rem;">Entities are matched using their Home Assistant device-registry MAC/IP identifiers, including Shelly devices. MAC addresses are matched first; ambiguous matches are left unlinked for manual selection.</p>
+            @if (_syncResults.Count == 0)
+            {
+                <p style="color:#64748b;">No Home Assistant entities with a usable device-registry IP or MAC address were found.</p>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr><th>Entity</th><th>Name</th><th>Matched Device</th><th>Network Addresses</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _syncResults)
+                        {
+                            <tr>
+                                <td>@r.EntityId</td>
+                                <td>@r.Name</td>
+                                <td>
+                                    <select value="@(r.LinkedDeviceId ?? "")" @onchange="@(e => OnSelectDeviceChanged(r.ServiceId, e.Value?.ToString()))">
+                                        <option value="">-- No linked device --</option>
+                                        @foreach (var d in _allDevices ?? Array.Empty<NetAdmin.Core.Models.HardwareDevice>())
+                                        {
+                                            <option value="@d.Id">@d.Name @if(!string.IsNullOrWhiteSpace(d.IpAddress)) { <text>• @d.IpAddress</text> } @if(string.IsNullOrWhiteSpace(d.IpAddress) && !string.IsNullOrWhiteSpace(d.MacAddress)) { <text>• @d.MacAddress</text> }</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td>@string.Join(", ", r.CandidateIdentifiers)</td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(r.LinkedDeviceId))
+                                    {
+                                        <button class="form-button" @onclick="() => ClearLinkAsync(r.ServiceId)">Unlink</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
         </div>
     }
 </div>
@@ -148,6 +163,7 @@
     private string? _statusMessage;
     private HomeAssistantStatusSummary? _statusSummary;
     private IReadOnlyList<NetAdmin.Core.Services.HomeAssistantSyncResult>? _syncResults;
+    private string? _syncErrorMessage;
     private bool _isSyncing;
     private IReadOnlyList<NetAdmin.Core.Models.HardwareDevice>? _allDevices;
 
@@ -181,12 +197,17 @@
     private async Task SyncEntitiesAsync()
     {
         _isSyncing = true;
+        _syncErrorMessage = null;
         try
         {
             var targetUrl = !string.IsNullOrWhiteSpace(Device.ManagementUrl) ? Device.ManagementUrl : Device.IpAddress;
             _syncResults = await HaSyncService.SyncEntitiesAsync(Device.Id, targetUrl);
-            // Load hardware inventory for selection
             _allDevices = await HardwareProvider.GetAllHardwareAsync();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or WebSocketException or InvalidOperationException or JsonException or TimeoutException)
+        {
+            _syncResults = null;
+            _syncErrorMessage = $"Could not discover Home Assistant device-registry entities: {ex.Message}";
         }
         finally
         {

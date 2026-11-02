@@ -758,6 +758,7 @@ public static class InfrastructureHardwareModuleExtensions
         services.TryAddSingleton<ProductCatalogRegistry>();
         // Register Home Assistant sync service implementation (depends on IHomeAssistantProvider registered by provider plugins)
         services.AddScoped<NetAdmin.Core.Services.IHomeAssistantSyncService, NetAdmin.Infrastructure.Services.HomeAssistantSyncService>();
+        services.AddScoped<NetAdmin.Core.Providers.ILinkedServiceProvider, NetAdmin.Infrastructure.Services.SqliteLinkedServiceProvider>();
 
         RegisterAssemblyHardwareTypes(services, typeof(InfrastructureHardwareModuleExtensions).Assembly);
 
