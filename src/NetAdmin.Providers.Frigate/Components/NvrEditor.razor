@@ -41,8 +41,8 @@
                 <button class="btn btn--danger" @onclick="RemoveCameraViaGo2RtcAsync" disabled="@(_isRemovingCamera || string.IsNullOrWhiteSpace(_newCameraName))">
                     @(_isRemovingCamera ? "⏳ Removing..." : "🗑️ Remove from go2rtc")
                 </button>
-                <button class="btn" @onclick="OpenImportModalAsync" disabled="@(_statusSummary is null || _statusSummary.Cameras.Count == 0)">
-                    📥 Import connected cameras
+                <button class="btn" @onclick="OpenImportModalAsync" disabled="@(_statusSummary is null)">
+                    🔗 Link / sync Frigate cameras
                 </button>
             </div>
             @if (!string.IsNullOrWhiteSpace(_cameraActionMessage))
@@ -71,28 +71,48 @@
     @if (_showImportModal)
     {
         <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:50;">
-            <div style="background:white; padding:1rem; border-radius:8px; width:720px; max-width:95%;">
-                <h3 style="margin-top:0;">Import cameras from Frigate</h3>
-                <div style="max-height: 50vh; overflow:auto; margin-bottom:0.75rem;">
-                    @foreach (var c in _importCandidates.Select((v, i) => (v, i)))
+            <div style="background:white; padding:1rem; border-radius:8px; width:900px; max-width:95%;">
+                <h3 style="margin-top:0;">Link Frigate cameras to inventory</h3>
+                <div style="max-height: 60vh; overflow:auto; margin-bottom:0.75rem;">
+                    @if (_importCandidates.Count == 0)
                     {
-                        var idx = c.i;
-                        var candidate = _importCandidates[idx];
-                        <div style="display:flex; gap:0.5rem; align-items:center; padding:0.4rem; border-bottom:1px solid #eef2f7;">
-                            <input type="checkbox" checked="@candidate.Selected" @onchange="@(e => _importCandidates[idx] = (candidate.Name, candidate.Path, (bool?)e.Value == true, candidate.Status))" />
-                            <div style="flex:1; min-width:0;">
-                                <div style="display:flex; gap:0.6rem; align-items:center;">
-                                    <div style="font-weight:600;">@candidate.Name</div>
-                                    <div style="font-size:0.75rem; padding:0.15rem 0.4rem; border-radius:12px; background:@(candidate.Status=="Update"?"#ecfeff":"#eef2ff"); color:@(candidate.Status=="Update"?"#065f46":"#1e3a8a"); font-weight:600;">@candidate.Status</div>
-                                </div>
-                                <div style="font-size:0.85rem; color:#64748b;">@(string.IsNullOrWhiteSpace(candidate.Path) ? "(no configured stream)" : candidate.Path)</div>
+                        <p>No Frigate camera definitions were found. Check the Frigate connection and camera configuration.</p>
+                    }
+                    @foreach (var candidate in _importCandidates)
+                    {
+                        <div style="padding:0.6rem; border-bottom:1px solid #eef2f7;">
+                            <div style="display:flex; gap:0.5rem; align-items:center;">
+                                <input type="checkbox" checked="@candidate.Selected" @onchange="@(e => UpdateImportCandidate(candidate, candidate with { Selected = (bool?)e.Value == true }))" />
+                                <strong>@candidate.Name</strong>
+                                <span style="font-size:0.75rem; padding:0.15rem 0.4rem; border-radius:12px; background:@(candidate.Status == "Linked" ? "#dcfce7" : "#eef2ff"); color:@(candidate.Status == "Linked" ? "#166534" : "#1e3a8a"); font-weight:600;">@candidate.Status</span>
+                            </div>
+                            <label class="form-label" style="margin:0.4rem 0 0.2rem 1.6rem;">Inventory camera</label>
+                            <select class="form-select" style="margin-left:1.6rem; width:calc(100% - 1.6rem);" value="@candidate.TargetHardwareId" @onchange="@(e => UpdateImportCandidate(candidate, candidate with { TargetHardwareId = e.Value?.ToString() ?? string.Empty }))">
+                                <option value="">Create a new camera</option>
+                                @foreach (var camera in _availableCameras)
+                                {
+                                    <option value="@camera.Id" disabled="@IsCameraAssignedToOtherCandidate(camera.Id, candidate)">@camera.Name@(string.IsNullOrWhiteSpace(camera.IpAddress) ? "" : $" — {camera.IpAddress}")</option>
+                                }
+                            </select>
+                            <div style="font-size:0.82rem; color:#64748b; margin:0.3rem 0 0 1.6rem;">
+                                @if (candidate.Streams.Count == 0)
+                                {
+                                    <span>No configured FFmpeg stream inputs.</span>
+                                }
+                                else
+                                {
+                                    @foreach (var stream in candidate.Streams)
+                                    {
+                                        <div>@stream.Name (@stream.Protocol): @stream.Url</div>
+                                    }
+                                }
                             </div>
                         </div>
                     }
                 </div>
                 <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
                     <button class="btn btn--ghost" @onclick="CancelImport">Cancel</button>
-                    <button class="btn" @onclick="ImportSelectedAsync">Import Selected (@_importCandidates.Count(c=>c.Selected))</button>
+                    <button class="btn" @onclick="ImportSelectedAsync" disabled="@(_isSyncing || !_importCandidates.Any(candidate => candidate.Selected))">@(_isSyncing ? "Syncing..." : $"Sync Selected ({_importCandidates.Count(candidate => candidate.Selected)})")</button>
                 </div>
             </div>
         </div>
@@ -175,7 +195,17 @@
     private bool _isRemovingCamera;
     private string? _cameraActionMessage;
     private bool _showImportModal;
-    private List<(string Name, string? Path, bool Selected, string Status)> _importCandidates = new();
+    private bool _isSyncing;
+    private List<FrigateImportCandidate> _importCandidates = [];
+    private List<CameraHardwareDevice> _availableCameras = [];
+    private HashSet<string> _existingHardwareIds = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record FrigateImportCandidate(
+        string Name,
+        IReadOnlyList<CameraStreamDefinition> Streams,
+        bool Selected,
+        string TargetHardwareId,
+        string Status);
 
     private async Task AddCameraViaGo2RtcAsync()
     {
@@ -244,178 +274,181 @@
         return outS;
     }
 
-    private async Task ImportCamerasAsync()
-    {
-        if (_statusSummary is null) return;
-        _cameraActionMessage = null;
-
-        try
-        {
-            var sources = await FrigateProvider.GetCameraSourcesAsync(Device.Id);
-
-            // Load existing hardware once for deduplication lookups
-            var existingAll = (await HardwareProvider.GetAllHardwareAsync()).ToList();
-            var byName = existingAll.ToDictionary(h => h.Name, StringComparer.OrdinalIgnoreCase);
-            var byPath = new Dictionary<string, NetAdmin.Core.Models.HardwareDevice>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var h in existingAll)
-            {
-                if (h is NetAdmin.Core.Models.CameraHardwareDevice camh)
-                {
-                    if (!string.IsNullOrWhiteSpace(camh.RtspPath))
-                        byPath[camh.RtspPath!] = h;
-                    if (camh.Streams is { Count: > 0 })
-                    {
-                        foreach (var s in camh.Streams)
-                        {
-                            if (!string.IsNullOrWhiteSpace(s.Url) && !byPath.ContainsKey(s.Url))
-                                byPath[s.Url] = h;
-                        }
-                    }
-                }
-            }
-
-            var created = 0;
-            var updated = 0;
-
-            // If import candidates are populated and some are unselected, use selection filter
-            IEnumerable<string>? selectionFilter = null;
-            if (_importCandidates is not null && _importCandidates.Count > 0 && _importCandidates.Any(c => !c.Selected))
-            {
-                selectionFilter = _importCandidates.Where(c => c.Selected).Select(c => c.Name).ToList();
-            }
-
-            foreach (var cam in _statusSummary.Cameras)
-            {
-                var name = cam.Name;
-                sources.TryGetValue(name, out var path);
-
-                if (selectionFilter is not null && !selectionFilter.Contains(name))
-                    continue;
-
-                // Try to find existing by RTSP path first, then by name
-                NetAdmin.Core.Models.HardwareDevice? existing = null;
-                if (!string.IsNullOrWhiteSpace(path) && byPath.TryGetValue(path!, out var byp))
-                    existing = byp;
-                else if (byName.TryGetValue(name, out var byn))
-                    existing = byn;
-
-                if (existing is not null && existing is NetAdmin.Core.Models.CameraHardwareDevice existingCam)
-                {
-                    // Update existing camera: ensure RtspPath and Streams populated, add frigate tag if missing
-                    var tags = existingCam.TagsCsv ?? "";
-                    var frigTag = !string.IsNullOrWhiteSpace(Device?.Id) ? $"frigate:{Device.Id}" : "frigate";
-                    if (!tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(frigTag))
-                    {
-                        tags = string.IsNullOrWhiteSpace(tags) ? frigTag : tags + "," + frigTag;
-                    }
-
-                    var streams = existingCam.Streams is not null ? existingCam.Streams.ToList() : new List<NetAdmin.Core.Models.CameraStreamDefinition>();
-                    if (!string.IsNullOrWhiteSpace(path))
-                    {
-                        if (!streams.Any(s => string.Equals(s.Url, path, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            streams.Insert(0, new NetAdmin.Core.Models.CameraStreamDefinition("Main Stream", path!, "RTSP"));
-                        }
-                    }
-
-                    var updatedCam = existingCam with
-                    {
-                        Name = name,
-                        RtspPath = string.IsNullOrWhiteSpace(existingCam.RtspPath) ? path : existingCam.RtspPath,
-                        NvrId = Device?.Id,
-                        Streams = streams,
-                        TagsCsv = tags,
-                        Notes = string.IsNullOrWhiteSpace(existingCam.Notes) ? "Imported from Frigate" : existingCam.Notes + "; Imported from Frigate"
-                    };
-
-                    await HardwareProvider.SaveHardwareAsync(updatedCam);
-                    updated++;
-                }
-                else
-                {
-                    // Create new camera entry
-                    var idBase = SanitizeId($"frigate-{Device.Id ?? "local"}-{name}");
-                    var id = idBase;
-
-                    var frigTag = !string.IsNullOrWhiteSpace(Device?.Id) ? $"frigate:{Device.Id}" : "frigate";
-                    var tagsCsv = $"camera,frigate,{frigTag}";
-
-                    var streams = path is not null ? new[] { new NetAdmin.Core.Models.CameraStreamDefinition("Main Stream", path, "RTSP") } : null as IReadOnlyList<NetAdmin.Core.Models.CameraStreamDefinition>;
-
-                    var camDev = new NetAdmin.Core.Models.CameraHardwareDevice(
-                        Id: id,
-                        Name: name,
-                        IpAddress: null,
-                        MacAddress: null,
-                        Room: "",
-                        Vendor: "Frigate",
-                        Model: "",
-                        PortCount: 1,
-                        RtspPath: path,
-                        Notes: $"Imported from Frigate NVR {Device?.Id}",
-                        NvrId: Device?.Id,
-                        TagsCsv: tagsCsv,
-                        Streams: streams);
-
-                    await HardwareProvider.SaveHardwareAsync(camDev);
-                    created++;
-                }
-            }
-
-            _cameraActionMessage = $"✅ Imported {created} new camera(s), updated {updated} existing camera(s).";
-        }
-        catch
-        {
-            _cameraActionMessage = "❌ Failed to import cameras.";
-        }
-    }
-
     private async Task OpenImportModalAsync()
     {
+        _cameraActionMessage = null;
+        var definitions = await FrigateProvider.GetCameraDefinitionsAsync(Device.Id);
+        var existingHardware = await HardwareProvider.GetAllHardwareAsync();
+        _existingHardwareIds = existingHardware.Select(hardware => hardware.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _availableCameras = existingHardware.OfType<CameraHardwareDevice>().ToList();
+        var assignedCameraIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _importCandidates = definitions.Select(definition =>
+        {
+            var matchingCamera = FindMatchingCamera(definition, assignedCameraIds);
+            if (matchingCamera is not null)
+                assignedCameraIds.Add(matchingCamera.Id);
+
+            return new FrigateImportCandidate(
+                definition.Name,
+                definition.Streams,
+                Selected: true,
+                TargetHardwareId: matchingCamera?.Id ?? string.Empty,
+                Status: string.Equals(matchingCamera?.NvrId, Device.Id, StringComparison.OrdinalIgnoreCase) ? "Linked" : matchingCamera is null ? "New" : "Match");
+        }).ToList();
         _showImportModal = true;
-        _importCandidates.Clear();
-        if (_statusSummary is null) return;
+    }
 
-        var sources = await FrigateProvider.GetCameraSourcesAsync(Device.Id);
+    private CameraHardwareDevice? FindMatchingCamera(FrigateCameraDefinition definition, ISet<string> assignedCameraIds)
+    {
+        var byNvrAndName = _availableCameras.FirstOrDefault(camera =>
+            string.Equals(camera.NvrId, Device.Id, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(camera.Name, definition.Name, StringComparison.OrdinalIgnoreCase) &&
+            !assignedCameraIds.Contains(camera.Id));
+        if (byNvrAndName is not null)
+            return byNvrAndName;
 
-        // load existing devices to determine New vs Update
-        var existingAll = (await HardwareProvider.GetAllHardwareAsync()).ToList();
-        var byName = existingAll.ToDictionary(h => h.Name, StringComparer.OrdinalIgnoreCase);
-        var byPath = new Dictionary<string, NetAdmin.Core.Models.HardwareDevice>(StringComparer.OrdinalIgnoreCase);
-        foreach (var h in existingAll)
-        {
-            if (h is NetAdmin.Core.Models.CameraHardwareDevice camh)
-            {
-                if (!string.IsNullOrWhiteSpace(camh.RtspPath))
-                    byPath[camh.RtspPath!] = h;
-                if (camh.Streams is { Count: > 0 })
-                {
-                    foreach (var s in camh.Streams)
-                    {
-                        if (!string.IsNullOrWhiteSpace(s.Url) && !byPath.ContainsKey(s.Url))
-                            byPath[s.Url] = h;
-                    }
-                }
-            }
-        }
+        var streamUrls = definition.Streams.Select(stream => stream.Url).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var byStream = _availableCameras.FirstOrDefault(camera =>
+            !assignedCameraIds.Contains(camera.Id) &&
+            camera.EffectiveStreams.Any(stream => streamUrls.Contains(stream.Url)));
+        if (byStream is not null)
+            return byStream;
 
-        foreach (var cam in _statusSummary.Cameras)
-        {
-            sources.TryGetValue(cam.Name, out var path);
-            var status = "New";
-            if (!string.IsNullOrWhiteSpace(path) && byPath.ContainsKey(path!)) status = "Update";
-            else if (byName.ContainsKey(cam.Name)) status = "Update";
-            _importCandidates.Add((cam.Name, path, true, status));
-        }
+        return _availableCameras.FirstOrDefault(camera =>
+            !assignedCameraIds.Contains(camera.Id) &&
+            string.Equals(camera.Name, definition.Name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool IsCameraAssignedToOtherCandidate(string cameraId, FrigateImportCandidate candidate) =>
+        _importCandidates.Any(other => !ReferenceEquals(other, candidate) &&
+                                       other.Selected &&
+                                       string.Equals(other.TargetHardwareId, cameraId, StringComparison.OrdinalIgnoreCase));
+
+    private void UpdateImportCandidate(FrigateImportCandidate original, FrigateImportCandidate updated)
+    {
+        var index = _importCandidates.IndexOf(original);
+        if (index >= 0)
+            _importCandidates[index] = updated;
     }
 
     private async Task ImportSelectedAsync()
     {
-        // ensure _importCandidates is used as selection filter by ImportCamerasAsync
-        await ImportCamerasAsync();
-        _showImportModal = false;
-        _importCandidates.Clear();
+        if (_isSyncing)
+            return;
+
+        var created = 0;
+        var linked = 0;
+        var updated = 0;
+        _isSyncing = true;
+
+        try
+        {
+            var selectedCandidates = _importCandidates.Where(candidate => candidate.Selected).ToList();
+            var duplicateCameraId = selectedCandidates
+                .Where(candidate => !string.IsNullOrWhiteSpace(candidate.TargetHardwareId))
+                .GroupBy(candidate => candidate.TargetHardwareId, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault(group => group.Count() > 1)?.Key;
+            if (duplicateCameraId is not null)
+                throw new InvalidOperationException($"Inventory camera '{duplicateCameraId}' is assigned to multiple Frigate cameras.");
+
+            var unavailableCameraId = selectedCandidates
+                .Where(candidate => !string.IsNullOrWhiteSpace(candidate.TargetHardwareId))
+                .Select(candidate => candidate.TargetHardwareId)
+                .FirstOrDefault(id => _availableCameras.All(camera => !string.Equals(camera.Id, id, StringComparison.OrdinalIgnoreCase)));
+            if (unavailableCameraId is not null)
+                throw new InvalidOperationException($"The selected camera '{unavailableCameraId}' is no longer available.");
+
+            foreach (var candidate in selectedCandidates)
+            {
+                if (string.IsNullOrWhiteSpace(candidate.TargetHardwareId))
+                {
+                    await HardwareProvider.SaveHardwareAsync(CreateCamera(candidate));
+                    created++;
+                    continue;
+                }
+
+                var camera = _availableCameras.FirstOrDefault(item => string.Equals(item.Id, candidate.TargetHardwareId, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException($"The selected camera '{candidate.TargetHardwareId}' is no longer available.");
+                var wasLinked = string.Equals(camera.NvrId, Device.Id, StringComparison.OrdinalIgnoreCase);
+                await HardwareProvider.SaveHardwareAsync(LinkCamera(camera, candidate));
+                if (wasLinked)
+                    updated++;
+                else
+                    linked++;
+            }
+
+            _cameraActionMessage = $"Synced {created} new camera(s), linked {linked} existing camera(s), and refreshed {updated} linked camera(s).";
+            _showImportModal = false;
+            _importCandidates.Clear();
+        }
+        catch (InvalidOperationException exception)
+        {
+            _cameraActionMessage = $"Camera sync failed: {exception.Message}";
+        }
+        finally
+        {
+            _isSyncing = false;
+        }
+    }
+
+    private CameraHardwareDevice LinkCamera(CameraHardwareDevice camera, FrigateImportCandidate candidate)
+    {
+        var streams = camera.EffectiveStreams.ToList();
+        foreach (var stream in candidate.Streams)
+        {
+            if (!streams.Any(existing => string.Equals(existing.Url, stream.Url, StringComparison.OrdinalIgnoreCase)))
+                streams.Add(stream);
+        }
+
+        var frigateTag = $"frigate:{Device.Id}";
+        var tags = camera.TagsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        if (!tags.Contains("frigate", StringComparer.OrdinalIgnoreCase))
+            tags.Add("frigate");
+        if (!tags.Contains(frigateTag, StringComparer.OrdinalIgnoreCase))
+            tags.Add(frigateTag);
+
+        return camera with
+        {
+            NvrId = Device.Id,
+            RtspPath = string.IsNullOrWhiteSpace(camera.RtspPath) ? candidate.Streams.FirstOrDefault()?.Url : camera.RtspPath,
+            Streams = streams,
+            TagsCsv = string.Join(", ", tags),
+            Notes = AppendImportedNote(camera.Notes)
+        };
+    }
+
+    private CameraHardwareDevice CreateCamera(FrigateImportCandidate candidate)
+    {
+        var idBase = SanitizeId($"frigate-{Device.Id}-{candidate.Name}");
+        var id = idBase;
+        var suffix = 2;
+        while (_existingHardwareIds.Contains(id))
+            id = $"{idBase}-{suffix++}";
+        _existingHardwareIds.Add(id);
+
+        var streams = candidate.Streams.ToList();
+        return new CameraHardwareDevice(
+            Id: id,
+            Name: candidate.Name,
+            IpAddress: null,
+            MacAddress: null,
+            Room: "",
+            Vendor: "",
+            Model: "",
+            PortCount: 1,
+            RtspPath: streams.FirstOrDefault()?.Url,
+            Notes: $"Imported from Frigate NVR {Device.Id}",
+            NvrId: Device.Id,
+            TagsCsv: $"camera, frigate, frigate:{Device.Id}",
+            Streams: streams);
+    }
+
+    private static string AppendImportedNote(string notes)
+    {
+        const string importedNote = "Imported from Frigate";
+        return notes.Contains(importedNote, StringComparison.OrdinalIgnoreCase)
+            ? notes
+            : string.IsNullOrWhiteSpace(notes) ? importedNote : $"{notes}; {importedNote}";
     }
 
     private void CancelImport()
