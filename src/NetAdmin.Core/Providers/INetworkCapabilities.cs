@@ -105,6 +105,10 @@ public record FrigateCameraSummary(
     double DetectionFps,
     bool DetectionEnabled);
 
+public record FrigateCameraDefinition(
+    string Name,
+    IReadOnlyList<CameraStreamDefinition> Streams);
+
 public record FrigateStatusSummary(
     string Version,
     int CameraCount,
@@ -126,6 +130,7 @@ public interface IFrigateProvider : INetworkIntegration
     // when frigateBaseUrl/apiToken are null.
     Task<bool> AddCameraToFrigateAsync(string? deviceId, string cameraName, string rtspUrl, string? frigateBaseUrl = null, CancellationToken ct = default);
     Task<bool> RemoveCameraFromFrigateAsync(string? deviceId, string cameraName, string? frigateBaseUrl = null, CancellationToken ct = default);
+    Task<IReadOnlyList<FrigateCameraDefinition>> GetCameraDefinitionsAsync(string? deviceId = null, string? frigateBaseUrl = null, CancellationToken ct = default);
     Task<IReadOnlyDictionary<string, string?>> GetCameraSourcesAsync(string? deviceId = null, string? frigateBaseUrl = null, CancellationToken ct = default);
 }
 

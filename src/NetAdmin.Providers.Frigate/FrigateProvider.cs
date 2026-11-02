@@ -234,53 +234,76 @@ public class FrigateProvider(
         }
     }
 
-    public async Task<IReadOnlyDictionary<string, string?>> GetCameraSourcesAsync(string? deviceId = null, string? frigateBaseUrl = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<FrigateCameraDefinition>> GetCameraDefinitionsAsync(string? deviceId = null, string? frigateBaseUrl = null, CancellationToken ct = default)
     {
         var baseUrlRaw = await ResolveSettingAsync(deviceId, "api:baseurl", "Frigate:BaseUrl", frigateBaseUrl, ct);
         var baseUrl = NormalizeBaseUrl(baseUrlRaw, "http", 5000);
-        if (string.IsNullOrWhiteSpace(baseUrl)) return new Dictionary<string, string?>();
+        if (string.IsNullOrWhiteSpace(baseUrl))
+            return [];
 
         var apiToken = await ResolveSettingAsync(deviceId, "api:token", "Frigate:ApiToken", null, ct);
+        using var request = CreateAuthenticatedGetRequest($"{baseUrl}/api/config", bearerToken: apiToken);
+        using var config = await SendAndParseJsonAsync(request, ct);
+        if (config is null || !config.RootElement.TryGetProperty("cameras", out var cameras) || cameras.ValueKind != JsonValueKind.Object)
+            return [];
 
-        try
+        var definitions = new List<FrigateCameraDefinition>();
+        foreach (var camera in cameras.EnumerateObject())
         {
-            using var getReq = CreateAuthenticatedGetRequest($"{baseUrl}/api/config", bearerToken: apiToken);
-            using var cfgDoc = await SendAndParseJsonAsync(getReq, ct);
-            if (cfgDoc is null) return new Dictionary<string, string?>();
-
-            var root = cfgDoc.RootElement;
-            var result = new Dictionary<string, string?>();
-
-            if (root.TryGetProperty("cameras", out var camsProp) && camsProp.ValueKind == JsonValueKind.Object)
+            var streams = new List<NetAdmin.Core.Models.CameraStreamDefinition>();
+            if (camera.Value.ValueKind == JsonValueKind.Object &&
+                camera.Value.TryGetProperty("ffmpeg", out var ffmpeg) && ffmpeg.ValueKind == JsonValueKind.Object &&
+                ffmpeg.TryGetProperty("inputs", out var inputs) && inputs.ValueKind == JsonValueKind.Array)
             {
-                foreach (var cam in camsProp.EnumerateObject())
+                var streamNumber = 0;
+                foreach (var input in inputs.EnumerateArray())
                 {
-                    string? path = null;
-                    if (cam.Value.ValueKind == JsonValueKind.Object && cam.Value.TryGetProperty("ffmpeg", out var ff) && ff.ValueKind == JsonValueKind.Object)
-                    {
-                        if (ff.TryGetProperty("inputs", out var inputs) && inputs.ValueKind == JsonValueKind.Array && inputs.GetArrayLength() > 0)
-                        {
-                            var first = inputs[0];
-                            if (first.ValueKind == JsonValueKind.Object && first.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String)
-                            {
-                                path = p.GetString();
-                            }
-                        }
-                    }
+                    if (input.ValueKind != JsonValueKind.Object ||
+                        !input.TryGetProperty("path", out var pathProperty) || pathProperty.ValueKind != JsonValueKind.String)
+                        continue;
 
-                    result[cam.Name] = path;
+                    var path = pathProperty.GetString();
+                    if (string.IsNullOrWhiteSpace(path))
+                        continue;
+
+                    streamNumber++;
+                    var roles = input.TryGetProperty("roles", out var rolesProperty) && rolesProperty.ValueKind == JsonValueKind.Array
+                        ? string.Join(", ", rolesProperty.EnumerateArray()
+                            .Where(role => role.ValueKind == JsonValueKind.String)
+                            .Select(role => role.GetString())
+                            .Where(role => !string.IsNullOrWhiteSpace(role)))
+                        : string.Empty;
+                    var streamName = string.IsNullOrWhiteSpace(roles)
+                        ? $"Stream {streamNumber}"
+                        : $"Stream {streamNumber} ({roles})";
+                    streams.Add(new NetAdmin.Core.Models.CameraStreamDefinition(
+                        streamName,
+                        path,
+                        GetStreamProtocol(path)));
                 }
             }
 
-            return result;
+            definitions.Add(new FrigateCameraDefinition(camera.Name, streams));
         }
-        catch
-        {
-            return new Dictionary<string, string?>();
-        }
+
+        return definitions;
     }
 
-    public async Task<NetAdmin.Core.Models.ServiceStatus?> GetServiceStatusAsync(string? serviceId = null, string? baseUrl = null, string? linkedDeviceId = null, CancellationToken ct = default)
+    public async Task<IReadOnlyDictionary<string, string?>> GetCameraSourcesAsync(string? deviceId = null, string? frigateBaseUrl = null, CancellationToken ct = default)
+    {
+        var definitions = await GetCameraDefinitionsAsync(deviceId, frigateBaseUrl, ct);
+        return definitions.ToDictionary(
+            definition => definition.Name,
+            definition => definition.Streams.FirstOrDefault()?.Url,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string GetStreamProtocol(string path) =>
+        Uri.TryCreate(path, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Scheme)
+            ? uri.Scheme.ToUpperInvariant()
+            : "RTSP";
+
+    public async Task<NetAdmin.Core.Models.ServiceStatus?> GetServiceStatusAsync(string? serviceId = null, string? baseUrl = null, CancellationToken ct = default)
     {
         var sum = await GetStatusAsync(linkedDeviceId ?? serviceId, baseUrl, ct);
         if (sum is null) return null;
