@@ -14,10 +14,12 @@ public record HomeAssistantSyncResult(
 public interface IHomeAssistantSyncService
 {
     /// <summary>
-    /// Sync entities from the specified Home Assistant instance and upsert corresponding
-    /// Service records. Returns a list of results describing matched devices.
+    /// Sync all entities from the specified Home Assistant instance and upsert corresponding
+    /// service records. Each result includes any automatically matched hardware device.
     /// </summary>
     Task<IReadOnlyList<HomeAssistantSyncResult>> SyncEntitiesAsync(string? deviceId = null, string? ipOrUrl = null, CancellationToken ct = default);
+
+    Task<IReadOnlyList<HomeAssistantSyncResult>> SyncServiceEntitiesAsync(string serviceId, CancellationToken ct = default);
 
     /// <summary>
     /// Set or clear the linked device id for a previously synced service.

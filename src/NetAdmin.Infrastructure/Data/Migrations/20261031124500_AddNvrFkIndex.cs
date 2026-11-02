@@ -46,7 +46,7 @@ namespace NetAdmin.Infrastructure.Data.Migrations
                 CREATE INDEX ""IX_HardwareDevices_NvrId"" ON ""HardwareDevices"" (""NvrId"");
                 COMMIT;
                 PRAGMA foreign_keys=on;
-            ");
+            ", suppressTransaction: true);
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)
@@ -82,7 +82,7 @@ namespace NetAdmin.Infrastructure.Data.Migrations
                 ALTER TABLE ""HardwareDevices_old"" RENAME TO ""HardwareDevices"";
                 COMMIT;
                 PRAGMA foreign_keys=on;
-            ");
+            ", suppressTransaction: true);
         }
     }
 }

@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @using NetAdmin.Core.Providers
 @using NetAdmin.Core.Services
+@using NetAdmin.Core.Models
 @inject IEncryptedSettingsService SettingsService
 @inject IAdminAuthService AuthService
 @inject IEnumerable<IRoutingProvider> RoutingProviders
@@ -9,6 +10,7 @@
 @inject IEnumerable<IFrigateProvider> FrigateProviders
 @inject IEnumerable<IHomeAssistantProvider> HomeAssistantProviders
 @inject NavigationManager Navigation
+@inject IHardwareInventoryProvider HardwareProvider
 
 <PageTitle>NetAdmin - Settings & Onboarding</PageTitle>
 
@@ -151,11 +153,40 @@
     </div>
 
     <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-bottom: 2rem;">
+        <button @onclick="PrepareMigrationPreviewAsync"
+                style="padding: 0.5rem 1rem; background: #0f172a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            🔁 Migrate Global Settings To Devices
+        </button>
+
         <button @onclick="SaveSettingsAsync"
                 style="padding: 0.75rem 1.5rem; background: #16a34a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
-            💾 Save Encrypted Settings
+            💾 Create Devices & Save Credentials
         </button>
     </div>
+
+    @if (_showMigrationPreview)
+    {
+        <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+            <h4 style="margin:0 0 0.5rem 0;">Migration Preview</h4>
+            <p style="margin:0 0 0.5rem 0; color:#92400e;">The following global settings will be copied to device-scoped settings. Review and confirm. Global values will be cleared after migration.</p>
+            <table style="width:100%; border-collapse: collapse; margin-top:0.5rem;">
+                <thead>
+                    <tr style="text-align:left; background:#fff7ed; border-bottom:1px solid #fcd34d;"><th style="padding:0.4rem">Global Key</th><th>Value</th><th>Target Device</th><th>Target Key</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var it in _migrationPreview)
+                    {
+                        <tr style="border-bottom:1px solid #f3f4f6;"><td style="padding:0.45rem">@it.GlobalKey</td><td>@(string.IsNullOrWhiteSpace(it.Value) ? "(empty)" : it.Value)</td><td>@it.TargetDeviceName (@it.TargetDeviceId)</td><td>@it.TargetKey</td></tr>
+                    }
+                </tbody>
+            </table>
+
+            <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.75rem;">
+                <button @onclick="CancelMigrationPreview" style="padding:0.5rem 0.9rem; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px;">Cancel</button>
+                <button @onclick="ConfirmMigrationAsync" style="padding:0.5rem 0.9rem; background:#0f172a; color:white; border:none; border-radius:6px;">Confirm Migration</button>
+            </div>
+        </div>
+    }
 
     <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.5rem;">
         <h3 style="margin-top: 0; color: #1e293b;">👤 Administrator Account</h3>
@@ -206,23 +237,14 @@
     private bool _testingHa;
     private string? _statusMessage;
     private bool _isError;
+    // Migration preview state
+    private bool _showMigrationPreview;
+    private List<MigrationItem> _migrationPreview = new();
 
     protected override async Task OnInitializedAsync()
     {
-        _opnBaseUrl = await SettingsService.GetSettingAsync("OpnSense:BaseUrl", "OpnSense:BaseUrl") ?? "https://192.168.1.1";
-        _opnApiKey = await SettingsService.GetSettingAsync("OpnSense:ApiKey", "OpnSense:ApiKey") ?? string.Empty;
-        _opnApiSecret = await SettingsService.GetSettingAsync("OpnSense:ApiSecret", "OpnSense:ApiSecret") ?? string.Empty;
-
-        _unifiBaseUrl = await SettingsService.GetSettingAsync("UniFi:BaseUrl", "UniFi:BaseUrl") ?? "https://192.168.1.10:8443";
-        _unifiUsername = await SettingsService.GetSettingAsync("UniFi:Username", "UniFi:Username") ?? string.Empty;
-        _unifiPassword = await SettingsService.GetSettingAsync("UniFi:Password", "UniFi:Password") ?? string.Empty;
-        _unifiSite = await SettingsService.GetSettingAsync("UniFi:Site", "UniFi:Site") ?? "default";
-
-        _frigateBaseUrl = await SettingsService.GetSettingAsync("Frigate:BaseUrl", "Frigate:BaseUrl") ?? string.Empty;
-        _frigateApiToken = await SettingsService.GetSettingAsync("Frigate:ApiToken", "Frigate:ApiToken") ?? string.Empty;
-
-        _haBaseUrl = await SettingsService.GetSettingAsync("HomeAssistant:BaseUrl", "HomeAssistant:BaseUrl") ?? string.Empty;
-        _haAccessToken = await SettingsService.GetSettingAsync("HomeAssistant:AccessToken", "HomeAssistant:AccessToken") ?? string.Empty;
+        // Load device-scoped credentials if devices exist; prefer per-device settings over global settings.
+        await LoadDeviceSettingsAsync();
 
         _adminUsername = await AuthService.GetAdminUsernameAsync() ?? "admin";
     }
@@ -231,23 +253,28 @@
     {
         try
         {
-            await SettingsService.SaveSettingAsync("OpnSense:BaseUrl", _opnBaseUrl);
-            await SettingsService.SaveSettingAsync("OpnSense:ApiKey", _opnApiKey);
-            await SettingsService.SaveSettingAsync("OpnSense:ApiSecret", _opnApiSecret);
+            // Create or find devices and store credentials per-device instead of global settings.
+            var opn = await GetOrCreateDeviceAsync("opnsense-router", "OPNsense Firewall", HardwareCategory.Router, "", "OPNsense", "OPNsense Firewall");
+            await SettingsService.SaveSettingAsync($"device:{opn.Id}:api:baseurl", string.IsNullOrWhiteSpace(_opnBaseUrl) ? null : _opnBaseUrl);
+            await SettingsService.SaveSettingAsync($"device:{opn.Id}:api:key", string.IsNullOrWhiteSpace(_opnApiKey) ? null : _opnApiKey);
+            await SettingsService.SaveSettingAsync($"device:{opn.Id}:api:secret", string.IsNullOrWhiteSpace(_opnApiSecret) ? null : _opnApiSecret);
 
-            await SettingsService.SaveSettingAsync("UniFi:BaseUrl", _unifiBaseUrl);
-            await SettingsService.SaveSettingAsync("UniFi:Username", _unifiUsername);
-            await SettingsService.SaveSettingAsync("UniFi:Password", _unifiPassword);
-            await SettingsService.SaveSettingAsync("UniFi:Site", _unifiSite);
+            var u = await GetOrCreateDeviceAsync("unifi-controller", "UniFi Controller", HardwareCategory.Server, "", "UniFi", "UniFi Controller");
+            await SettingsService.SaveSettingAsync($"device:{u.Id}:unifi:baseurl", string.IsNullOrWhiteSpace(_unifiBaseUrl) ? null : _unifiBaseUrl);
+            await SettingsService.SaveSettingAsync($"device:{u.Id}:unifi:username", string.IsNullOrWhiteSpace(_unifiUsername) ? null : _unifiUsername);
+            await SettingsService.SaveSettingAsync($"device:{u.Id}:unifi:password", string.IsNullOrWhiteSpace(_unifiPassword) ? null : _unifiPassword);
+            await SettingsService.SaveSettingAsync($"device:{u.Id}:unifi:site", string.IsNullOrWhiteSpace(_unifiSite) ? null : _unifiSite);
 
-            await SettingsService.SaveSettingAsync("Frigate:BaseUrl", _frigateBaseUrl);
-            await SettingsService.SaveSettingAsync("Frigate:ApiToken", _frigateApiToken);
+            var f = await GetOrCreateDeviceAsync("frigate-nvr", "Frigate NVR", HardwareCategory.Nvr, "", "Frigate", "Frigate NVR");
+            await SettingsService.SaveSettingAsync($"device:{f.Id}:api:baseurl", string.IsNullOrWhiteSpace(_frigateBaseUrl) ? null : _frigateBaseUrl);
+            await SettingsService.SaveSettingAsync($"device:{f.Id}:api:token", string.IsNullOrWhiteSpace(_frigateApiToken) ? null : _frigateApiToken);
 
-            await SettingsService.SaveSettingAsync("HomeAssistant:BaseUrl", _haBaseUrl);
-            await SettingsService.SaveSettingAsync("HomeAssistant:AccessToken", _haAccessToken);
+            var ha = await GetOrCreateDeviceAsync("homeassistant", "Home Assistant", HardwareCategory.HomeAutomation, "", "HomeAssistant", "Home Assistant");
+            await SettingsService.SaveSettingAsync($"device:{ha.Id}:api:baseurl", string.IsNullOrWhiteSpace(_haBaseUrl) ? null : _haBaseUrl);
+            await SettingsService.SaveSettingAsync($"device:{ha.Id}:api:token", string.IsNullOrWhiteSpace(_haAccessToken) ? null : _haAccessToken);
 
             _isError = false;
-            _statusMessage = "✅ Settings saved and encrypted in the SQLite database!";
+            _statusMessage = "✅ Devices created/updated and credentials saved per-device (encrypted).";
         }
         catch (Exception ex)
         {
@@ -349,5 +376,219 @@
         _newAdminPassword = string.Empty;
         _isError = false;
         _statusMessage = "✅ Administrator account credentials updated!";
+    }
+
+    // Finds an existing device by common signals (id, vendor, tags) or creates a new one with the provided defaults.
+    private async Task<HardwareDevice> GetOrCreateDeviceAsync(string suggestedId, string name, HardwareCategory category, string ipAddress, string vendor, string model)
+    {
+        var all = await HardwareProvider.GetAllHardwareAsync();
+        var found = all.FirstOrDefault(d => (!string.IsNullOrWhiteSpace(d.Id) && d.Id.Contains(suggestedId, StringComparison.OrdinalIgnoreCase)) ||
+                                            (!string.IsNullOrWhiteSpace(d.TagsCsv) && d.TagsCsv.Contains(suggestedId, StringComparison.OrdinalIgnoreCase)) ||
+                                            (!string.IsNullOrWhiteSpace(d.Vendor) && d.Vendor.Contains(vendor, StringComparison.OrdinalIgnoreCase)));
+
+        if (found is not null)
+            return found;
+
+        var id = suggestedId;
+        var device = new HardwareDevice(
+            Id: id,
+            Name: name,
+            Category: category,
+            IpAddress: string.IsNullOrWhiteSpace(ipAddress) ? null : ipAddress,
+            MacAddress: null,
+            Room: "Server Closet",
+            PortCount: 1,
+            ManagementUrl: null,
+            Notes: $"Created by onboarding for {name}",
+            TagsCsv: suggestedId,
+            Vendor: vendor,
+            Model: model);
+
+        await HardwareProvider.SaveHardwareAsync(device);
+        return device;
+    }
+
+    // Try to load existing device-scoped settings and populate the onboarding fields.
+    private async Task LoadDeviceSettingsAsync()
+    {
+        try
+        {
+            var all = await HardwareProvider.GetAllHardwareAsync();
+
+            var opn = all.FirstOrDefault(d => d.TagsCsv?.Contains("opnsense", StringComparison.OrdinalIgnoreCase) == true || d.Id.Contains("opnsense", StringComparison.OrdinalIgnoreCase));
+            if (opn is not null)
+            {
+                _opnBaseUrl = await SettingsService.GetSettingAsync($"device:{opn.Id}:api:baseurl") ?? string.Empty;
+                _opnApiKey = await SettingsService.GetSettingAsync($"device:{opn.Id}:api:key") ?? string.Empty;
+                _opnApiSecret = await SettingsService.GetSettingAsync($"device:{opn.Id}:api:secret") ?? string.Empty;
+            }
+
+            var u = all.FirstOrDefault(d => d.TagsCsv?.Contains("unifi", StringComparison.OrdinalIgnoreCase) == true || d.Vendor.Contains("UniFi", StringComparison.OrdinalIgnoreCase));
+            if (u is not null)
+            {
+                _unifiBaseUrl = await SettingsService.GetSettingAsync($"device:{u.Id}:unifi:baseurl") ?? string.Empty;
+                _unifiUsername = await SettingsService.GetSettingAsync($"device:{u.Id}:unifi:username") ?? string.Empty;
+                _unifiPassword = await SettingsService.GetSettingAsync($"device:{u.Id}:unifi:password") ?? string.Empty;
+                _unifiSite = await SettingsService.GetSettingAsync($"device:{u.Id}:unifi:site") ?? _unifiSite;
+            }
+
+            var f = all.FirstOrDefault(d => d.TagsCsv?.Contains("frigate", StringComparison.OrdinalIgnoreCase) == true || d.Vendor.Contains("Frigate", StringComparison.OrdinalIgnoreCase));
+            if (f is not null)
+            {
+                _frigateBaseUrl = await SettingsService.GetSettingAsync($"device:{f.Id}:api:baseurl") ?? string.Empty;
+                _frigateApiToken = await SettingsService.GetSettingAsync($"device:{f.Id}:api:token") ?? string.Empty;
+            }
+
+            var ha = all.FirstOrDefault(d => d.TagsCsv?.Contains("homeassistant", StringComparison.OrdinalIgnoreCase) == true || d.Vendor.Contains("HomeAssistant", StringComparison.OrdinalIgnoreCase));
+            if (ha is not null)
+            {
+                _haBaseUrl = await SettingsService.GetSettingAsync($"device:{ha.Id}:api:baseurl") ?? string.Empty;
+                _haAccessToken = await SettingsService.GetSettingAsync($"device:{ha.Id}:api:token") ?? string.Empty;
+            }
+        }
+        catch { }
+    }
+
+    private record MigrationItem(string GlobalKey, string Value, string TargetDeviceId, string TargetDeviceName, string TargetKey);
+
+    // Prepare a preview of what would be migrated. This collects global values and the target mapping but does not modify data.
+    private async Task PrepareMigrationPreviewAsync()
+    {
+        _migrationPreview.Clear();
+        _showMigrationPreview = false;
+
+        try
+        {
+            var all = await HardwareProvider.GetAllHardwareAsync();
+
+            // OPNsense
+            var g = await SettingsService.GetSettingAsync("OpnSense:BaseUrl", "OpnSense:BaseUrl");
+            var gk = await SettingsService.GetSettingAsync("OpnSense:ApiKey", "OpnSense:ApiKey");
+            var gsec = await SettingsService.GetSettingAsync("OpnSense:ApiSecret", "OpnSense:ApiSecret");
+            if (!string.IsNullOrWhiteSpace(g) || !string.IsNullOrWhiteSpace(gk) || !string.IsNullOrWhiteSpace(gsec))
+            {
+                var found = all.FirstOrDefault(d => (!string.IsNullOrWhiteSpace(d.TagsCsv) && d.TagsCsv.Contains("opnsense", StringComparison.OrdinalIgnoreCase)) || (!string.IsNullOrWhiteSpace(d.Id) && d.Id.Contains("opnsense", StringComparison.OrdinalIgnoreCase)));
+                var targetId = found?.Id ?? "opnsense-router";
+                var targetName = found?.Name ?? "OPNsense Firewall";
+                if (!string.IsNullOrWhiteSpace(g)) _migrationPreview.Add(new MigrationItem("OpnSense:BaseUrl", g, targetId, targetName, $"device:{targetId}:api:baseurl"));
+                if (!string.IsNullOrWhiteSpace(gk)) _migrationPreview.Add(new MigrationItem("OpnSense:ApiKey", "(secret)", targetId, targetName, $"device:{targetId}:api:key"));
+                if (!string.IsNullOrWhiteSpace(gsec)) _migrationPreview.Add(new MigrationItem("OpnSense:ApiSecret", "(secret)", targetId, targetName, $"device:{targetId}:api:secret"));
+            }
+
+            // UniFi
+            var ubase = await SettingsService.GetSettingAsync("UniFi:BaseUrl", "UniFi:BaseUrl");
+            var uuser = await SettingsService.GetSettingAsync("UniFi:Username", "UniFi:Username");
+            var upass = await SettingsService.GetSettingAsync("UniFi:Password", "UniFi:Password");
+            var usite = await SettingsService.GetSettingAsync("UniFi:Site", "UniFi:Site");
+            if (!string.IsNullOrWhiteSpace(ubase) || !string.IsNullOrWhiteSpace(uuser) || !string.IsNullOrWhiteSpace(upass) || !string.IsNullOrWhiteSpace(usite))
+            {
+                var found = all.FirstOrDefault(d => (!string.IsNullOrWhiteSpace(d.TagsCsv) && d.TagsCsv.Contains("unifi", StringComparison.OrdinalIgnoreCase)) || (!string.IsNullOrWhiteSpace(d.Vendor) && d.Vendor.Contains("UniFi", StringComparison.OrdinalIgnoreCase)));
+                var targetId = found?.Id ?? "unifi-controller";
+                var targetName = found?.Name ?? "UniFi Controller";
+                if (!string.IsNullOrWhiteSpace(ubase)) _migrationPreview.Add(new MigrationItem("UniFi:BaseUrl", ubase, targetId, targetName, $"device:{targetId}:unifi:baseurl"));
+                if (!string.IsNullOrWhiteSpace(uuser)) _migrationPreview.Add(new MigrationItem("UniFi:Username", uuser, targetId, targetName, $"device:{targetId}:unifi:username"));
+                if (!string.IsNullOrWhiteSpace(upass)) _migrationPreview.Add(new MigrationItem("UniFi:Password", "(secret)", targetId, targetName, $"device:{targetId}:unifi:password"));
+                if (!string.IsNullOrWhiteSpace(usite)) _migrationPreview.Add(new MigrationItem("UniFi:Site", usite, targetId, targetName, $"device:{targetId}:unifi:site"));
+            }
+
+            // Frigate
+            var fbase = await SettingsService.GetSettingAsync("Frigate:BaseUrl", "Frigate:BaseUrl");
+            var ftoken = await SettingsService.GetSettingAsync("Frigate:ApiToken", "Frigate:ApiToken");
+            if (!string.IsNullOrWhiteSpace(fbase) || !string.IsNullOrWhiteSpace(ftoken))
+            {
+                var found = all.FirstOrDefault(d => (!string.IsNullOrWhiteSpace(d.TagsCsv) && d.TagsCsv.Contains("frigate", StringComparison.OrdinalIgnoreCase)) || (!string.IsNullOrWhiteSpace(d.Vendor) && d.Vendor.Contains("Frigate", StringComparison.OrdinalIgnoreCase)));
+                var targetId = found?.Id ?? "frigate-nvr";
+                var targetName = found?.Name ?? "Frigate NVR";
+                if (!string.IsNullOrWhiteSpace(fbase)) _migrationPreview.Add(new MigrationItem("Frigate:BaseUrl", fbase, targetId, targetName, $"device:{targetId}:api:baseurl"));
+                if (!string.IsNullOrWhiteSpace(ftoken)) _migrationPreview.Add(new MigrationItem("Frigate:ApiToken", "(secret)", targetId, targetName, $"device:{targetId}:api:token"));
+            }
+
+            // Home Assistant
+            var habase = await SettingsService.GetSettingAsync("HomeAssistant:BaseUrl", "HomeAssistant:BaseUrl");
+            var hatoken = await SettingsService.GetSettingAsync("HomeAssistant:AccessToken", "HomeAssistant:AccessToken");
+            if (!string.IsNullOrWhiteSpace(habase) || !string.IsNullOrWhiteSpace(hatoken))
+            {
+                var found = all.FirstOrDefault(d => (!string.IsNullOrWhiteSpace(d.TagsCsv) && d.TagsCsv.Contains("homeassistant", StringComparison.OrdinalIgnoreCase)) || (!string.IsNullOrWhiteSpace(d.Vendor) && d.Vendor.Contains("HomeAssistant", StringComparison.OrdinalIgnoreCase)));
+                var targetId = found?.Id ?? "homeassistant";
+                var targetName = found?.Name ?? "Home Assistant";
+                if (!string.IsNullOrWhiteSpace(habase)) _migrationPreview.Add(new MigrationItem("HomeAssistant:BaseUrl", habase, targetId, targetName, $"device:{targetId}:api:baseurl"));
+                if (!string.IsNullOrWhiteSpace(hatoken)) _migrationPreview.Add(new MigrationItem("HomeAssistant:AccessToken", "(secret)", targetId, targetName, $"device:{targetId}:api:token"));
+            }
+
+            if (_migrationPreview.Count == 0)
+            {
+                _isError = false;
+                _statusMessage = "No global settings found to migrate.";
+            }
+            else
+            {
+                _showMigrationPreview = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _isError = true;
+            _statusMessage = $"Failed to prepare migration: {ex.Message}";
+        }
+    }
+
+    private void CancelMigrationPreview()
+    {
+        _showMigrationPreview = false;
+        _migrationPreview.Clear();
+    }
+
+    // Perform the migration that was previewed. Copies preview items into device-scoped settings and clears globals.
+    private async Task ConfirmMigrationAsync()
+    {
+        if (_migrationPreview.Count == 0)
+        {
+            _statusMessage = "Nothing to migrate.";
+            _showMigrationPreview = false;
+            return;
+        }
+
+        try
+        {
+            // Ensure devices exist for each target
+            foreach (var item in _migrationPreview)
+            {
+                // If the target device id doesn't exist yet, create it with a sensible name
+                var all = await HardwareProvider.GetAllHardwareAsync();
+                var found = all.FirstOrDefault(d => string.Equals(d.Id, item.TargetDeviceId, StringComparison.OrdinalIgnoreCase));
+                if (found is null)
+                {
+                    // create device with basic metadata based on target id
+                    var nameGuess = item.TargetDeviceName ?? item.TargetDeviceId;
+                    await GetOrCreateDeviceAsync(item.TargetDeviceId, nameGuess, item.TargetDeviceName?.Contains("Controller") == true ? HardwareCategory.Server : HardwareCategory.Generic, "", item.TargetDeviceName ?? "", item.TargetDeviceName ?? "");
+                }
+                // Save to device-scoped key
+                await SettingsService.SaveSettingAsync(item.TargetKey, string.IsNullOrWhiteSpace(item.Value) ? null : item.Value);
+            }
+
+            // clear the known global keys
+            await SettingsService.SaveSettingAsync("OpnSense:BaseUrl", null);
+            await SettingsService.SaveSettingAsync("OpnSense:ApiKey", null);
+            await SettingsService.SaveSettingAsync("OpnSense:ApiSecret", null);
+            await SettingsService.SaveSettingAsync("UniFi:BaseUrl", null);
+            await SettingsService.SaveSettingAsync("UniFi:Username", null);
+            await SettingsService.SaveSettingAsync("UniFi:Password", null);
+            await SettingsService.SaveSettingAsync("UniFi:Site", null);
+            await SettingsService.SaveSettingAsync("Frigate:BaseUrl", null);
+            await SettingsService.SaveSettingAsync("Frigate:ApiToken", null);
+            await SettingsService.SaveSettingAsync("HomeAssistant:BaseUrl", null);
+            await SettingsService.SaveSettingAsync("HomeAssistant:AccessToken", null);
+
+            _isError = false;
+            _statusMessage = "✅ Migration complete — global settings copied to device-scoped settings and globals cleared.";
+            _showMigrationPreview = false;
+            _migrationPreview.Clear();
+            await LoadDeviceSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            _isError = true;
+            _statusMessage = $"Migration failed: {ex.Message}";
+        }
     }
 }

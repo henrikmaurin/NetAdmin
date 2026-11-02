@@ -30,8 +30,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<RoomEntity>().HasKey(r => r.Id);
 
         modelBuilder.Entity<HardwareDeviceEntity>().HasKey(h => h.Id);
+        modelBuilder.Entity<HardwareDeviceEntity>().HasIndex(h => h.NvrId);
         modelBuilder.Entity<PatchPanelPortItemEntity>().HasKey(p => new { p.PatchPanelId, p.PortNumber });
         modelBuilder.Entity<ServiceEntity>().HasKey(s => s.Id);
+        modelBuilder.Entity<ServiceEntity>().HasIndex(s => s.ParentServiceId);
+        modelBuilder.Entity<ServiceEntity>().HasIndex(s => new { s.LinkedDeviceId, s.IsServiceInstance });
     }
 }
 
@@ -139,4 +142,6 @@ public class ServiceEntity
     public string Type { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string? LinkedDeviceId { get; set; }
+    public string? ParentServiceId { get; set; }
+    public bool IsServiceInstance { get; set; }
 }

@@ -3,6 +3,7 @@
 @using NetAdmin.Core.Models
 @using NetAdmin.Core.Providers
 @using NetAdmin.Infrastructure.Services
+@inject ILinkedServiceProvider LinkedServiceProvider
 @inject NetworkTopologyService TopologyService
 @inject IEnumerable<IWirelessProvider> WirelessProviders
 @inject IEnumerable<IDhcpProvider> DhcpProviders
@@ -16,38 +17,9 @@
 <PageTitle>NetAdmin - Network Overview</PageTitle>
 
 <div style="font-family: system-ui, sans-serif; max-width: 1400px; margin: 0 auto; padding: 1.5rem;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-        <div>
-            <h1 style="margin: 0;">NetAdmin Dashboard</h1>
-            <small style="color: #666;">OPNsense + UniFi Network + Hardware Inventory</small>
-        </div>
-
-        <div style="display: flex; gap: 0.75rem; align-items: center;">
-            <a href="/hardware"
-               style="padding: 0.6rem 1.2rem; background: #0284c7; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
-                🖧 Hardware & Cabling
-            </a>
-            <a href="/catalog"
-               style="padding: 0.6rem 1.2rem; background: #0369a1; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
-                📦 Product Catalog
-            </a>
-            <a href="/switch"
-               style="padding: 0.6rem 1.2rem; background: #1e293b; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
-                🎛️ Switch VLAN Guide
-            </a>
-            <a href="/setup"
-               style="padding: 0.6rem 1.2rem; background: #0f172a; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
-                ⚙️ Settings
-            </a>
-            <a href="/rooms"
-               style="padding: 0.6rem 1.2rem; background: #0f172a; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem;">
-                🏠 Rooms & Zones
-            </a>
-            <button @onclick="LoadDataAsync" disabled="@_isLoading"
-                    style="padding: 0.6rem 1.2rem; background: #16a34a; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">
-                @(_isLoading ? "Loading..." : "↻ Refresh Now")
-            </button>
-        </div>
+    <div style="margin-bottom: 1.5rem;">
+        <h1 style="margin: 0;">NetAdmin Dashboard</h1>
+        <small style="color: #666;">Network and hardware overview</small>
     </div>
 
     @if (!string.IsNullOrEmpty(_actionStatus))
@@ -94,6 +66,15 @@
                     <tr style="border-bottom: 1px solid #e2e8f0;">
                         <td style="padding: 0.65rem 0.75rem;">
                             <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                @if (hw is not null)
+                                {
+                                    var deviceModule = TypeRegistry.Resolve(hw);
+                                    <span title="@deviceModule.DisplayName" aria-label="@deviceModule.DisplayName" style="font-size:1.15rem;">@deviceModule.Icon</span>
+                                }
+                                else
+                                {
+                                    <span title="Unclassified network device" aria-label="Unclassified network device" style="font-size:1.15rem;">❔</span>
+                                }
                                 <button @onclick="() => OpenOrRegisterClientAsync(client)"
                                         style="background: none; border: none; color: #0284c7; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; font-size: 0.95rem; text-align: left;">
                                     @(customName ?? networkHostname ?? "Unknown Device") →
@@ -106,6 +87,28 @@
                                     @(string.IsNullOrWhiteSpace(networkHostname) ? "none" : networkHostname)
                                 </code>
                             </div>
+                            @if (hw is not null)
+                            {
+                                var serviceLinks = GetLinkedServices(hw);
+                                var frigateDevice = hw is CameraHardwareDevice camera && !string.IsNullOrWhiteSpace(camera.NvrId)
+                                    ? GetHardwareById(camera.NvrId)
+                                    : null;
+                                @if (serviceLinks.Count > 0 || frigateDevice is not null)
+                                {
+                                    <div style="display:flex; flex-wrap:wrap; gap:0.3rem; margin-top:0.35rem;">
+                                        @foreach (var serviceLink in GetDashboardServiceLinks(serviceLinks))
+                                        {
+                                            <a href="@GetServiceUrl(serviceLink.Id)" title="@serviceLink.Title" style="display:inline-block; padding:0.12rem 0.4rem; border:1px solid #cbd5e1; border-radius:4px; background:#f8fafc; color:#0369a1; text-decoration:none; font-size:0.72rem;">
+                                                @serviceLink.Icon @serviceLink.Name
+                                            </a>
+                                        }
+                                        @if (frigateDevice is not null)
+                                        {
+                                            <a href="/device/@frigateDevice.Id" title="Open Frigate NVR @frigateDevice.Name" style="display:inline-block; padding:0.12rem 0.4rem; border:1px solid #cbd5e1; border-radius:4px; background:#f8fafc; color:#0369a1; text-decoration:none; font-size:0.72rem;">🎥 Frigate: @frigateDevice.Name</a>
+                                        }
+                                    </div>
+                                }
+                            }
                         </td>
 
                         <td style="padding: 0.65rem 0.75rem;">
@@ -214,6 +217,8 @@
 @code {
     private IReadOnlyList<CorrelatedClient> _clients = [];
     private Dictionary<string, HardwareDevice> _hardwareByMac = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, HardwareDevice> _hardwareById = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyDictionary<string, IReadOnlyList<LinkedServiceSummary>> _linkedServicesByDevice = new Dictionary<string, IReadOnlyList<LinkedServiceSummary>>(StringComparer.OrdinalIgnoreCase);
 
     private bool _isLoading;
     private string _searchQuery = "";
@@ -248,6 +253,8 @@
         {
             _clients = await TopologyService.GetCorrelatedClientsAsync();
             var allHw = await HardwareProvider.GetAllHardwareAsync();
+            _hardwareById = allHw.ToDictionary(device => device.Id, StringComparer.OrdinalIgnoreCase);
+            _linkedServicesByDevice = await LinkedServiceProvider.GetLinkedServicesForDevicesAsync(allHw.Select(device => device.Id).ToArray());
             _hardwareByMac = allHw
                 .Where(h => !string.IsNullOrWhiteSpace(h.MacAddress))
                 .GroupBy(h => MacAddress.Normalize(h.MacAddress!))
@@ -265,6 +272,46 @@
         _hardwareByMac.TryGetValue(MacAddress.Normalize(macAddress), out var hw);
         return hw;
     }
+
+    private IReadOnlyList<LinkedServiceSummary> GetLinkedServices(HardwareDevice device) =>
+        _linkedServicesByDevice.GetValueOrDefault(device.Id, []);
+
+    private HardwareDevice? GetHardwareById(string id) =>
+        _hardwareById.GetValueOrDefault(id);
+
+    private static IReadOnlyList<DashboardServiceLink> GetDashboardServiceLinks(IReadOnlyList<LinkedServiceSummary> services)
+    {
+        var links = new List<DashboardServiceLink>();
+        var homeAssistantServices = services.Where(service =>
+            HomeAssistantServiceIds.IsEntityServiceId(service.Id) || HomeAssistantServiceIds.IsInstanceServiceId(service.Id));
+
+        foreach (var group in homeAssistantServices.GroupBy(service =>
+                     HomeAssistantServiceIds.IsEntityServiceId(service.Id) ? service.ParentServiceId ?? service.Id : service.Id,
+                     StringComparer.OrdinalIgnoreCase))
+        {
+            var entityCount = group.Count(service => HomeAssistantServiceIds.IsEntityServiceId(service.Id));
+            var title = entityCount > 0
+                ? $"Home Assistant device with {entityCount} linked entities"
+                : "Open Home Assistant service";
+            links.Add(new DashboardServiceLink(group.Key, "Home Assistant", title, "🏠"));
+        }
+
+        links.AddRange(services
+            .Where(service => !HomeAssistantServiceIds.IsEntityServiceId(service.Id) &&
+                              !HomeAssistantServiceIds.IsInstanceServiceId(service.Id))
+            .Select(service => new DashboardServiceLink(
+                service.Id,
+                service.Name,
+                $"Open linked {service.Type} service: {service.Name}",
+                Enum.TryParse<ServiceType>(service.Type, true, out var type) && type == ServiceType.Nvr ? "🎥" : "🔗")));
+
+        return links;
+    }
+
+    private static string GetServiceUrl(string serviceId) =>
+        $"/services#service-{Uri.EscapeDataString(serviceId)}";
+
+    private sealed record DashboardServiceLink(string Id, string Name, string Title, string Icon);
 
     private async Task OpenOrRegisterClientAsync(CorrelatedClient client)
     {

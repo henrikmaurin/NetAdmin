@@ -1,6 +1,7 @@
 @page "/services"
 @rendermode InteractiveServer
 @using System.Text.Json
+@using System.Net.WebSockets
 @using Microsoft.EntityFrameworkCore
 @using NetAdmin.Core.Models
 @using NetAdmin.Infrastructure.Data
@@ -8,6 +9,9 @@
 @inject IHardwareInventoryProvider HardwareProvider
 @inject IJSRuntime JS
 @inject NetAdmin.Web.Services.ServiceProviderRegistry ProviderRegistry
+@inject NetAdmin.Core.Services.IEncryptedSettingsService SettingsService
+@inject NetAdmin.Core.Providers.ILinkedServiceProvider LinkedServiceProvider
+@inject NetAdmin.Core.Services.IHomeAssistantSyncService HomeAssistantSyncService
 
 <PageTitle>NetAdmin - Services</PageTitle>
 
@@ -90,7 +94,7 @@
                     {
                         if (_editingId is not null && s.Id == _editingId && _editingService is not null)
                         {
-                            <tr style="border-bottom:1px solid #e2e8f0; background:#f8fafc;">
+                            <tr id="@GetServiceRowId(s.Id)" style="border-bottom:1px solid #e2e8f0; background:#f8fafc;">
                                 <td style="padding:0.6rem; font-weight:600;">
                                     <input @bind="_editingService.Name" style="width:100%; padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;" />
                                 </td>
@@ -119,6 +123,34 @@
                                 </td>
                                 <td style="padding:0.6rem; color:#475569;">
                                     <input @bind="_editingService.Description" style="width:100%; padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;" />
+                                    @* Credentials editor for logical services (Frigate, HomeAssistant) *@
+                                    @if (_editingService is not null)
+                                    {
+                                        var provider = ProviderRegistry.GetProviderForType(_editingService.Type);
+                                        if (provider is not null)
+                                        {
+                                            if (provider.ProviderName.Contains("Frigate", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <div style="margin-top:0.6rem; background:#ffffff; border:1px dashed #e2e8f0; padding:0.5rem; border-radius:6px;">
+                                                    <div style="font-weight:600; margin-bottom:0.35rem;">Frigate Credentials</div>
+                                                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
+                                                        <input placeholder="Frigate Base URL" @bind="_editingServiceFrigateBaseUrl" style="padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;" />
+                                                        <input placeholder="Frigate API Token (optional)" @bind="_editingServiceFrigateApiToken" style="padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;" />
+                                                    </div>
+                                                </div>
+                                            }
+                                            else if (provider.ProviderName.Contains("Home Assistant", StringComparison.OrdinalIgnoreCase) || provider.ProviderName.Contains("HomeAssistant", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <div style="margin-top:0.6rem; background:#ffffff; border:1px dashed #e2e8f0; padding:0.5rem; border-radius:6px;">
+                                                    <div style="font-weight:600; margin-bottom:0.35rem;">Home Assistant Credentials</div>
+                                                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
+                                                        <input placeholder="Home Assistant Base URL" @bind="_editingServiceHaBaseUrl" style="padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;" />
+                                                        <input placeholder="Long-Lived Access Token" @bind="_editingServiceHaAccessToken" style="padding:0.35rem; border:1px solid #cbd5e1; border-radius:4px;" />
+                                                    </div>
+                                                </div>
+                                            }
+                                        }
+                                    }
                                 </td>
                                 <td style="padding:0.6rem; text-align:right;">
                                     <button @onclick="SaveEditAsync" style="background:#16a34a; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Save</button>
@@ -134,9 +166,19 @@
                         }
                         else
                         {
-                            <tr style="border-bottom:1px solid #e2e8f0;">
+                            <tr id="@GetServiceRowId(s.Id)" style="border-bottom:1px solid #e2e8f0;">
                                 <td style="padding:0.6rem; font-weight:600;">@s.Name</td>
-                                <td style="padding:0.6rem;">@s.Type</td>
+                                <td style="padding:0.6rem;">
+                                    @s.Type
+                                    @if (IsHomeAssistantEntity(s))
+                                    {
+                                        <small style="display:block; color:#64748b;">Home Assistant entity</small>
+                                    }
+                                    else if (IsHomeAssistantInstance(s))
+                                    {
+                                        <small style="display:block; color:#64748b;">Home Assistant instance</small>
+                                    }
+                                </td>
                                 <td style="padding:0.6rem;">
                                     @if (!string.IsNullOrWhiteSpace(s.LinkedDeviceId))
                                     {
@@ -157,10 +199,22 @@
                                 </td>
                                 <td style="padding:0.6rem; color:#475569;">@s.Description</td>
                                 <td style="padding:0.6rem; text-align:right;">
-                                    <button @onclick="() => BeginEdit(s)" style="background:#0f172a; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Edit</button>
-                                    <button @onclick="() => TestConnectionAsync(s.Id)" style="background:#1e40af; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Test</button>
-                                    <button @onclick="() => ShowDetails(s.Id)" disabled="@(!_lastStatuses.ContainsKey(s.Id))" style="background:#06b6d4; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Details</button>
+                                    <button @onclick="async () => await BeginEdit(s)" style="background:#0f172a; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Edit</button>
+                                    @if (IsHomeAssistantInstance(s))
+                                    {
+                                        <button @onclick="() => OpenHomeAssistantEntitiesAsync(s)" style="background:#0284c7; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Entities</button>
+                                    }
+                                    @if (!IsHomeAssistantEntity(s))
+                                    {
+                                        <button @onclick="() => TestConnectionAsync(s.Id)" disabled="@(_testingServiceId == s.Id)" style="background:#1e40af; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">@(_testingServiceId == s.Id ? "Testing..." : "Test")</button>
+                                        <button @onclick="() => ShowDetails(s.Id)" disabled="@(!_lastStatuses.ContainsKey(s.Id))" style="background:#06b6d4; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Details</button>
+                                        <button @onclick="() => OpenCredentialsModalAsync(s.Id)" style="background:#f59e0b; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-right:0.35rem;">Credentials</button>
+                                    }
                                     <button @onclick="() => ConfirmAndDeleteAsync(s.Id)" style="background:#dc2626; color:white; border:none; padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.85rem;">Remove</button>
+                                    @if (_testResults.TryGetValue(s.Id, out var testResult))
+                                    {
+                                        <div style="margin-top:0.35rem; color:@(_lastStatuses.ContainsKey(s.Id) ? "#15803d" : "#b91c1c"); font-size:0.8rem;">@testResult</div>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -169,13 +223,60 @@
             </table>
         }
     </div>
-    <div style="margin-top:0.6rem; color:#334155; font-size:0.9rem;">
-        @foreach(var kv in _testResults)
-        {
-            <div style="margin-top:0.25rem;">Test result for <strong>@(_services.FirstOrDefault(s => s.Id == kv.Key)?.Name ?? kv.Key)</strong>: <code style="background:#f1f5f9; padding:0.15rem 0.4rem; border-radius:4px;">@kv.Value</code></div>
-        }
-    </div>
-
+    @if (_selectedHomeAssistantService is not null)
+    {
+        <div style="background:white; border:1px solid #cbd5e1; border-radius:8px; padding:1.25rem; margin-top:1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+                <div>
+                    <h3 style="margin:0;">Home Assistant entities — @_selectedHomeAssistantService.Name</h3>
+                    <small style="color:#64748b;">Assign each entity to a hardware device, or choose Not linked.</small>
+                </div>
+                <button @onclick="DiscoverHomeAssistantEntitiesAsync" disabled="@_isDiscoveringEntities" style="padding:0.45rem 0.75rem; background:#0284c7; color:white; border:none; border-radius:4px; cursor:pointer;">
+                    @(_isDiscoveringEntities ? "Discovering..." : "Discover / refresh entities")
+                </button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_entityManagerMessage))
+            {
+                <p role="status" style="color:@(_entityManagerError ? "#991b1b" : "#166534");">@_entityManagerMessage</p>
+            }
+            @if (_homeAssistantEntities.Count == 0)
+            {
+                <p style="color:#64748b;">No entities have been synced yet. Discover entities using the button above.</p>
+            }
+            else
+            {
+                <table style="width:100%; border-collapse:collapse; font-size:0.9rem; margin-top:0.75rem;">
+                    <thead>
+                        <tr style="background:#f1f5f9; text-align:left; border-bottom:2px solid #cbd5e1;">
+                            <th style="padding:0.6rem;">Entity</th>
+                            <th style="padding:0.6rem;">Linked hardware</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entity in _homeAssistantEntities)
+                        {
+                            <tr style="border-bottom:1px solid #e2e8f0;">
+                                <td style="padding:0.6rem;">@entity.Name <span style="font-family:monospace; color:#64748b;">(@HomeAssistantServiceIds.GetEntityIdentifier(entity.Id))</span></td>
+                                <td style="padding:0.6rem;">
+                                    <select value="@entity.LinkedDeviceId" @onchange="args => SetHomeAssistantEntityLinkAsync(entity.Id, args)" disabled="@_isUpdatingEntityLink" style="min-width:220px; padding:0.4rem; border:1px solid #cbd5e1; border-radius:4px;">
+                                        <option value="">Not linked</option>
+                                        @if (!string.IsNullOrWhiteSpace(entity.LinkedDeviceId) && !_hardware.Any(device => device.Id == entity.LinkedDeviceId))
+                                        {
+                                            <option value="@entity.LinkedDeviceId">Unknown device (@entity.LinkedDeviceId)</option>
+                                        }
+                                        @foreach (var hardware in _hardware.OrderBy(device => device.Name))
+                                        {
+                                            <option value="@hardware.Id">@hardware.Name</option>
+                                        }
+                                    </select>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    }
     @if (_showDetailsModal && _modalStatus is not null)
     {
         <div style="position:fixed; inset:0; background:rgba(2,6,23,0.6); display:flex; align-items:center; justify-content:center; z-index:60;">
@@ -190,6 +291,41 @@
                     <div style="margin-bottom:0.5rem;"><strong>Summary:</strong> @_modalStatus.Summary</div>
                     <div style="margin-top:0.5rem;"><strong>Details (raw JSON):</strong></div>
                     <pre style="background:#f8fafc; padding:0.6rem; border-radius:6px; overflow:auto; max-height:50vh;">@DisplayDetails(_modalStatus.Details)</pre>
+                </div>
+            </div>
+        </div>
+    }
+    @if (_showCredModal)
+    {
+        <div style="position:fixed; inset:0; background:rgba(2,6,23,0.6); display:flex; align-items:center; justify-content:center; z-index:70;">
+            <div style="background:white; padding:1rem; border-radius:8px; width: 560px; max-height: 90%; overflow:auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                    <h3 style="margin:0;">Edit Credentials</h3>
+                    <button @onclick="CloseCredModal" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:0.3rem 0.6rem; border-radius:4px;">Close</button>
+                </div>
+
+                <div style="display:grid; gap:0.6rem;">
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:0.25rem;">Base URL</label>
+                        <input @bind="_credModalBaseUrl" placeholder="http://..." style="width:100%; padding:0.45rem; border:1px solid #cbd5e1; border-radius:6px;" />
+                    </div>
+                    <div>
+                        <label style="font-weight:600; display:block; margin-bottom:0.25rem;">Token / Password</label>
+                        <input @bind="_credModalToken" placeholder="Optional token" style="width:100%; padding:0.45rem; border:1px solid #cbd5e1; border-radius:6px;" />
+                    </div>
+                    <div style="display:flex; align-items:center; gap:0.5rem;">
+                        <input type="checkbox" @bind="_credModalAlsoSaveToDevice" />
+                        <span style="font-size:0.9rem; color:#334155;">Also save to linked device</span>
+                        @if (!string.IsNullOrWhiteSpace(_credModalLinkedDeviceId))
+                        {
+                            <small style="color:#64748b; margin-left:auto;">Linked device: @(_hardware.FirstOrDefault(d => d.Id == _credModalLinkedDeviceId)?.Name ?? _credModalLinkedDeviceId)</small>
+                        }
+                    </div>
+
+                    <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:0.5rem;">
+                        <button @onclick="CloseCredModal" style="padding:0.45rem 0.85rem; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px;">Cancel</button>
+                        <button @onclick="async () => await SaveCredentialsModalAsync()" style="padding:0.45rem 0.85rem; background:#0f172a; color:white; border:none; border-radius:6px;">Save</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -213,13 +349,49 @@
     private string _editErrorMessage = "";
     private Dictionary<string, NetAdmin.Core.Models.ServiceStatus> _lastStatuses = new();
     private Dictionary<string, string> _testResults = new();
+    private string? _testingServiceId;
     private bool _showDetailsModal;
     private NetAdmin.Core.Models.ServiceStatus? _modalStatus;
+    // Temporary credential fields when editing a logical service
+    private string _editingServiceFrigateBaseUrl = string.Empty;
+    private string _editingServiceFrigateApiToken = string.Empty;
+    private string _editingServiceHaBaseUrl = string.Empty;
+    private string _editingServiceHaAccessToken = string.Empty;
+    // Credentials modal state
+    private bool _showCredModal;
+    private string _credModalServiceId = string.Empty;
+    private string _credModalBaseUrl = string.Empty;
+    private string _credModalToken = string.Empty;
+    private bool _credModalAlsoSaveToDevice = true;
+    private string? _credModalLinkedDeviceId = null;
+    private string? _statusMessage;
+    private ServiceItem? _selectedHomeAssistantService;
+    private IReadOnlyList<LinkedServiceSummary> _homeAssistantEntities = [];
+    private bool _isDiscoveringEntities;
+    private bool _isUpdatingEntityLink;
+    private bool _entityManagerError;
+    private string? _entityManagerMessage;
 
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
     }
+
+    private static bool IsHomeAssistantInstance(ServiceItem service) =>
+        service.IsServiceInstance ||
+        HomeAssistantServiceIds.IsInstanceServiceId(service.Id) ||
+        (service.ParentServiceId is null &&
+         !HomeAssistantServiceIds.IsEntityServiceId(service.Id) &&
+         Enum.TryParse<ServiceType>(service.Type, true, out var type) &&
+         type == ServiceType.HomeAutomation);
+
+    private static bool IsHomeAssistantEntity(ServiceItem service) =>
+        !service.IsServiceInstance &&
+        !HomeAssistantServiceIds.IsInstanceServiceId(service.Id) &&
+        HomeAssistantServiceIds.IsEntityServiceId(service.Id);
+
+    private static string GetServiceRowId(string serviceId) =>
+        $"service-{serviceId}";
 
     private async Task LoadAsync()
     {
@@ -227,7 +399,79 @@
 
         await using var db = await DbFactory.CreateDbContextAsync();
         var rows = await db.Services.AsNoTracking().ToListAsync();
-        _services = rows.Select(s => new ServiceItem(s.Id, s.Name, s.Type, s.Description ?? "", s.LinkedDeviceId ?? "")).ToList();
+        _services = rows.Select(s => new ServiceItem(s.Id, s.Name, s.Type, s.Description ?? "", s.LinkedDeviceId ?? "", s.ParentServiceId, s.IsServiceInstance)).ToList();
+    }
+
+    private async Task OpenHomeAssistantEntitiesAsync(ServiceItem service)
+    {
+        _selectedHomeAssistantService = service;
+        _entityManagerError = false;
+        _entityManagerMessage = null;
+        await RefreshHomeAssistantEntitiesAsync();
+    }
+
+    private async Task DiscoverHomeAssistantEntitiesAsync()
+    {
+        if (_selectedHomeAssistantService is null)
+            return;
+
+        _isDiscoveringEntities = true;
+        _entityManagerError = false;
+        _entityManagerMessage = null;
+        try
+        {
+            var serviceId = _selectedHomeAssistantService.Id;
+            var results = await HomeAssistantSyncService.SyncServiceEntitiesAsync(serviceId);
+            await LoadAsync();
+            _selectedHomeAssistantService = _services.FirstOrDefault(service => service.Id == serviceId);
+            await RefreshHomeAssistantEntitiesAsync();
+            _entityManagerMessage = $"Discovery completed. {results.Count} entities were processed.";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or WebSocketException or JsonException or InvalidOperationException or TimeoutException or KeyNotFoundException)
+        {
+            _entityManagerError = true;
+            _entityManagerMessage = $"Home Assistant discovery failed: {ex.Message}";
+        }
+        finally
+        {
+            _isDiscoveringEntities = false;
+        }
+    }
+
+    private async Task SetHomeAssistantEntityLinkAsync(string serviceId, ChangeEventArgs args)
+    {
+        _isUpdatingEntityLink = true;
+        _entityManagerError = false;
+        _entityManagerMessage = null;
+        try
+        {
+            var linkedDeviceId = args.Value?.ToString();
+            await HomeAssistantSyncService.SetServiceLinkAsync(serviceId, linkedDeviceId);
+            await RefreshHomeAssistantEntitiesAsync();
+            _entityManagerMessage = string.IsNullOrWhiteSpace(linkedDeviceId)
+                ? "Home Assistant entity unlinked."
+                : "Home Assistant entity link updated.";
+        }
+        catch (Exception ex) when (ex is ArgumentException or KeyNotFoundException)
+        {
+            _entityManagerError = true;
+            _entityManagerMessage = $"Could not update entity link: {ex.Message}";
+        }
+        finally
+        {
+            _isUpdatingEntityLink = false;
+        }
+    }
+
+    private async Task RefreshHomeAssistantEntitiesAsync()
+    {
+        if (_selectedHomeAssistantService is null)
+        {
+            _homeAssistantEntities = [];
+            return;
+        }
+
+        _homeAssistantEntities = await LinkedServiceProvider.GetHomeAssistantEntitiesAsync(_selectedHomeAssistantService.Id);
     }
 
     private async Task AddServiceAsync()
@@ -292,10 +536,10 @@
         }
     }
 
-    private void BeginEdit(ServiceItem s)
+    private async Task BeginEdit(ServiceItem s)
     {
         _editingId = s.Id;
-        _editingService = new ServiceItem(s.Id, s.Name, s.Type, s.Description, s.LinkedDeviceId);
+        _editingService = new ServiceItem(s.Id, s.Name, s.Type, s.Description, s.LinkedDeviceId, s.ParentServiceId, s.IsServiceInstance);
         // map stored type to enum or custom
         if (Enum.TryParse<ServiceType>(s.Type, out var parsed))
         {
@@ -308,6 +552,13 @@
             _editingServiceCustomType = s.Type;
         }
         _editErrorMessage = null;
+        // Load any existing service-scoped credentials into temp fields
+        _editingServiceFrigateBaseUrl = await SettingsService.GetSettingAsync($"service:{s.Id}:api:baseurl") ?? string.Empty;
+        _editingServiceFrigateApiToken = await SettingsService.GetSettingAsync($"service:{s.Id}:api:token") ?? string.Empty;
+        _editingServiceHaBaseUrl = await SettingsService.GetSettingAsync($"service:{s.Id}:api:baseurl") ?? string.Empty;
+        _editingServiceHaAccessToken = await SettingsService.GetSettingAsync($"service:{s.Id}:api:token") ?? string.Empty;
+
+        StateHasChanged();
     }
 
     private void CancelEdit()
@@ -340,6 +591,23 @@
             entity.LinkedDeviceId = string.IsNullOrWhiteSpace(_editingService.LinkedDeviceId) ? null : _editingService.LinkedDeviceId;
             await db.SaveChangesAsync();
         }
+        // Save any entered service-scoped credentials
+        try
+        {
+            var sid = _editingService.Id;
+            // Frigate
+            if (!string.IsNullOrWhiteSpace(_editingServiceFrigateBaseUrl))
+                await SettingsService.SaveSettingAsync($"service:{sid}:api:baseurl", _editingServiceFrigateBaseUrl);
+            if (!string.IsNullOrWhiteSpace(_editingServiceFrigateApiToken))
+                await SettingsService.SaveSettingAsync($"service:{sid}:api:token", _editingServiceFrigateApiToken);
+
+            // Home Assistant
+            if (!string.IsNullOrWhiteSpace(_editingServiceHaBaseUrl))
+                await SettingsService.SaveSettingAsync($"service:{sid}:api:baseurl", _editingServiceHaBaseUrl);
+            if (!string.IsNullOrWhiteSpace(_editingServiceHaAccessToken))
+                await SettingsService.SaveSettingAsync($"service:{sid}:api:token", _editingServiceHaAccessToken);
+        }
+        catch { }
 
         _editingId = null;
         _editingService = null;
@@ -357,40 +625,45 @@
 
     private async Task TestConnectionAsync(string serviceId)
     {
-        _testResults.Remove(serviceId);
-        var svc = _services.FirstOrDefault(s => s.Id == serviceId);
-        if (svc is null)
+        var service = _services.FirstOrDefault(item => item.Id == serviceId);
+        if (service is null)
         {
             _testResults[serviceId] = "Service not found.";
             return;
         }
 
-        // Prefer provider matched via registry
-        var prov = ProviderRegistry.GetProviderForType(svc.Type);
-        var candidates = prov is not null ? new[] { prov }.Concat(ProviderRegistry.AllProviders().Except(new[] { prov })) : ProviderRegistry.AllProviders();
-
-        foreach (var provCandidate in candidates)
+        var provider = ProviderRegistry.GetProviderForType(service.Type);
+        if (provider is null)
         {
-            try
-            {
-                var status = await provCandidate.GetServiceStatusAsync(svc.Id, null);
-                if (status is not null)
-                {
-                    _lastStatuses[serviceId] = status;
-                    _testResults.Remove(serviceId);
-                    StateHasChanged();
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                // Keep trying other providers but capture last error
-                _testResults[serviceId] = $"Error: {ex.Message}";
-            }
+            _lastStatuses.Remove(serviceId);
+            _testResults[serviceId] = $"No provider is registered for service type '{service.Type}'.";
+            return;
         }
 
-        if (!_testResults.ContainsKey(serviceId))
-            _testResults[serviceId] = "No suitable provider responded.";
+        _testingServiceId = serviceId;
+        _lastStatuses.Remove(serviceId);
+        _testResults.Remove(serviceId);
+        StateHasChanged();
+        try
+        {
+            var status = await provider.GetServiceStatusAsync(service.Id, null, service.LinkedDeviceId);
+            if (status is null)
+            {
+                _testResults[serviceId] = $"{provider.ProviderName} did not respond. Check the service credentials and URL.";
+                return;
+            }
+
+            _lastStatuses[serviceId] = status;
+            _testResults[serviceId] = $"Connected to {status.ProviderName}.";
+        }
+        catch (Exception ex)
+        {
+            _testResults[serviceId] = $"Connection test failed: {ex.Message}";
+        }
+        finally
+        {
+            _testingServiceId = null;
+        }
     }
 
     private void ShowDetails(string serviceId)
@@ -408,15 +681,68 @@
         _showDetailsModal = false;
     }
 
+    private async Task OpenCredentialsModalAsync(string serviceId)
+    {
+        _credModalServiceId = serviceId;
+        // Load service entity to find linked device
+        var svc = _services.FirstOrDefault(s => s.Id == serviceId);
+        _credModalLinkedDeviceId = svc?.LinkedDeviceId;
+
+        // Prefer device-scoped credentials when linked device exists
+        if (!string.IsNullOrWhiteSpace(_credModalLinkedDeviceId))
+        {
+            _credModalBaseUrl = await SettingsService.GetSettingAsync($"device:{_credModalLinkedDeviceId}:api:baseurl") ?? string.Empty;
+            _credModalToken = await SettingsService.GetSettingAsync($"device:{_credModalLinkedDeviceId}:api:token") ?? string.Empty;
+            _credModalAlsoSaveToDevice = true;
+        }
+        else
+        {
+            _credModalBaseUrl = await SettingsService.GetSettingAsync($"service:{serviceId}:api:baseurl") ?? string.Empty;
+            _credModalToken = await SettingsService.GetSettingAsync($"service:{serviceId}:api:token") ?? string.Empty;
+            _credModalAlsoSaveToDevice = false;
+        }
+
+        _showCredModal = true;
+    }
+
+    private void CloseCredModal()
+    {
+        _showCredModal = false;
+        _credModalServiceId = string.Empty;
+        _credModalBaseUrl = string.Empty;
+        _credModalToken = string.Empty;
+    }
+
+    private async Task SaveCredentialsModalAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_credModalServiceId)) return;
+
+        // Save to service-scoped keys always
+        await SettingsService.SaveSettingAsync($"service:{_credModalServiceId}:api:baseurl", string.IsNullOrWhiteSpace(_credModalBaseUrl) ? null : _credModalBaseUrl);
+        await SettingsService.SaveSettingAsync($"service:{_credModalServiceId}:api:token", string.IsNullOrWhiteSpace(_credModalToken) ? null : _credModalToken);
+
+        // If linked device exists and option checked, also save to device
+        if (_credModalAlsoSaveToDevice && !string.IsNullOrWhiteSpace(_credModalLinkedDeviceId))
+        {
+            await SettingsService.SaveSettingAsync($"device:{_credModalLinkedDeviceId}:api:baseurl", string.IsNullOrWhiteSpace(_credModalBaseUrl) ? null : _credModalBaseUrl);
+            await SettingsService.SaveSettingAsync($"device:{_credModalLinkedDeviceId}:api:token", string.IsNullOrWhiteSpace(_credModalToken) ? null : _credModalToken);
+        }
+
+        _showCredModal = false;
+        _statusMessage = "✅ Credentials saved.";
+    }
+
     private class ServiceItem
     {
-        public ServiceItem(string id, string name, string type, string description, string linkedDeviceId)
+        public ServiceItem(string id, string name, string type, string description, string linkedDeviceId, string? parentServiceId = null, bool isServiceInstance = false)
         {
             Id = id;
             Name = name;
             Type = type;
             Description = description;
             LinkedDeviceId = linkedDeviceId;
+            ParentServiceId = parentServiceId;
+            IsServiceInstance = isServiceInstance;
         }
 
         public string Id { get; set; }
@@ -424,5 +750,7 @@
         public string Type { get; set; }
         public string Description { get; set; }
         public string LinkedDeviceId { get; set; }
+        public string? ParentServiceId { get; set; }
+        public bool IsServiceInstance { get; set; }
     }
 }

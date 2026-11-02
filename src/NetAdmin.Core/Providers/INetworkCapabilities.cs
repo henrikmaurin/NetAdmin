@@ -146,12 +146,12 @@ public interface IHomeAssistantProvider : INetworkIntegration
     Task<HomeAssistantStatusSummary?> GetStatusAsync(string? deviceId = null, string? ipOrUrl = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Retrieve the list of entities from a Home Assistant instance. The returned
-    /// HomeAssistantEntity objects include a small set of candidate identifiers
-    /// (ip, ip_address, mac, mac_address, device_id) extracted from attributes to
-    /// assist downstream matching to NetAdmin hardware entries.
+    /// Retrieve entities from a Home Assistant instance. Candidate network addresses
+    /// are extracted from state attributes and device-registry identifiers for matching to NetAdmin hardware.
     /// </summary>
     Task<IReadOnlyList<NetAdmin.Core.Models.HomeAssistantEntity>> GetEntitiesAsync(string? deviceId = null, string? ipOrUrl = null, CancellationToken ct = default);
+    Task<IReadOnlyList<NetAdmin.Core.Models.HomeAssistantEntity>> GetEntitiesForServiceAsync(string serviceId, string? linkedDeviceId = null, CancellationToken ct = default);
+    Task<IReadOnlyList<NetAdmin.Core.Models.HomeAssistantDevice>> GetDevicesForServiceAsync(string serviceId, string? linkedDeviceId = null, CancellationToken ct = default);
 }
 
 public record PatchPanelPort(
@@ -237,9 +237,19 @@ public interface IRoomProvider
 /// </summary>
 public interface IServiceIntegration : INetworkIntegration
 {
+    IReadOnlyCollection<ServiceType> SupportedServiceTypes => [];
+
     /// <summary>
     /// Get a normalized service status for the given service identifier or base URL.
     /// Returns null when the provider cannot reach or identify the service.
     /// </summary>
-    Task<NetAdmin.Core.Models.ServiceStatus?> GetServiceStatusAsync(string? serviceId = null, string? baseUrl = null, CancellationToken ct = default);
+    Task<NetAdmin.Core.Models.ServiceStatus?> GetServiceStatusAsync(string? serviceId = null, string? baseUrl = null, string? linkedDeviceId = null, CancellationToken ct = default);
+}
+
+public interface ILinkedServiceProvider
+{
+    Task<IReadOnlyList<NetAdmin.Core.Models.LinkedServiceSummary>> GetLinkedServicesAsync(string deviceId, CancellationToken ct = default);
+    Task<IReadOnlyList<NetAdmin.Core.Models.LinkedServiceSummary>> GetAvailableHomeAssistantServicesAsync(string homeAssistantDeviceId, CancellationToken ct = default);
+    Task<IReadOnlyList<NetAdmin.Core.Models.LinkedServiceSummary>> GetHomeAssistantEntitiesAsync(string homeAssistantDeviceId, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<string, IReadOnlyList<NetAdmin.Core.Models.LinkedServiceSummary>>> GetLinkedServicesForDevicesAsync(IReadOnlyCollection<string> deviceIds, CancellationToken ct = default);
 }

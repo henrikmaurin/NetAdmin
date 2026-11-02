@@ -204,6 +204,9 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
             b.Property<string>("Id")
                 .HasColumnType("TEXT");
 
+            b.Property<bool>("IsServiceInstance")
+                .HasColumnType("INTEGER");
+
             b.Property<string>("Description")
                 .IsRequired()
                 .HasColumnType("TEXT");
@@ -215,11 +218,18 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
                 .IsRequired()
                 .HasColumnType("TEXT");
 
+            b.Property<string>("ParentServiceId")
+                .HasColumnType("TEXT");
+
             b.Property<string>("Type")
                 .IsRequired()
                 .HasColumnType("TEXT");
 
             b.HasKey("Id");
+
+            b.HasIndex("ParentServiceId");
+
+            b.HasIndex("LinkedDeviceId", "IsServiceInstance");
 
             b.ToTable("Services");
         });
