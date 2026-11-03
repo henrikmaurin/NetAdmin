@@ -1,0 +1,52 @@
+{
+  "version": "0.2.0",
+  "setupDate": "2026-11-03",
+  "languages": [
+    "docker",
+    "csharp",
+    "markdown"
+  ],
+  "framework": null,
+  "packageManager": null,
+  "agents": [
+    "backend-developer",
+    "csharp-developer",
+    "azure-infra-engineer",
+    "deployment-engineer",
+    "devops-engineer",
+    "docker-expert",
+    "platform-engineer",
+    "sre-engineer",
+    "code-reviewer",
+    "dependency-manager",
+    "docs-writer",
+    "git-workflow-manager",
+    "test-writer",
+    "technical-writer",
+    "api-designer",
+    "frontend-developer",
+    "fullstack-developer",
+    "network-engineer",
+    "security-engineer",
+    "debugger",
+    "iot-engineer",
+    "agent-organizer"
+  ],
+  "skills": [
+    "git-release",
+    "pr-review",
+    "migration",
+    "test-patterns",
+    "deploy",
+    "dependency-audit",
+    "docker-optimize",
+    "changelog-generate",
+    "ci-pipeline"
+  ],
+  "modelStrategy": "cost-optimized",
+  "mcp": [
+    "context7",
+    "memory",
+    "git"
+  ]
+}

@@ -303,7 +303,7 @@ public class FrigateProvider(
             ? uri.Scheme.ToUpperInvariant()
             : "RTSP";
 
-    public async Task<NetAdmin.Core.Models.ServiceStatus?> GetServiceStatusAsync(string? serviceId = null, string? baseUrl = null, CancellationToken ct = default)
+    public async Task<NetAdmin.Core.Models.ServiceStatus?> GetServiceStatusAsync(string? serviceId = null, string? baseUrl = null, string? linkedDeviceId = null, CancellationToken ct = default)
     {
         var sum = await GetStatusAsync(linkedDeviceId ?? serviceId, baseUrl, ct);
         if (sum is null) return null;
