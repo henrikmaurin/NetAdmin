@@ -1,0 +1,84 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-sonnet-4-5-20250929",
+  "small_model": "anthropic/claude-haiku-4-5-20250929",
+  "agent": {
+    "build": {
+      "model": "anthropic/claude-sonnet-4-5-20250929"
+    },
+    "plan": {
+      "model": "anthropic/claude-haiku-4-5-20250929"
+    },
+    "explore": {
+      "model": "anthropic/claude-haiku-4-5-20250929"
+    },
+    "general": {
+      "model": "anthropic/claude-haiku-4-5-20250929"
+    },
+    "azure-infra-engineer": {
+      "steps": 15
+    },
+    "deployment-engineer": {
+      "steps": 15
+    },
+    "platform-engineer": {
+      "steps": 15
+    },
+    "sre-engineer": {
+      "steps": 15
+    },
+    "code-reviewer": {
+      "steps": 15
+    },
+    "dependency-manager": {
+      "steps": 10
+    },
+    "docs-writer": {
+      "steps": 10
+    },
+    "git-workflow-manager": {
+      "steps": 8
+    },
+    "technical-writer": {
+      "steps": 10
+    },
+    "network-engineer": {
+      "steps": 12
+    },
+    "security-engineer": {
+      "steps": 15
+    },
+    "debugger": {
+      "steps": 20
+    },
+    "agent-organizer": {
+      "steps": 5
+    }
+  },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    "memory": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "git": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-git"
+      ]
+    }
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true
+  }
+}
